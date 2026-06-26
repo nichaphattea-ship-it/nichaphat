@@ -24,7 +24,7 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const app = express();
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Body parsers with limits for excel uploads
 app.use(express.json({ limit: '10mb' }));
@@ -523,6 +523,110 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
 }
 
 
+// Helper function to build actual LINE-compatible responses (supporting text and beautiful Flex messages!)
+function buildLineMessage(result: any): any {
+  if (result.type === 'flex' && result.flexContent) {
+    const flexContent = result.flexContent;
+    const rows: any[] = [];
+    const items = flexContent.items || [];
+    
+    // Group items into rows of 2 buttons each to look super-polished on mobile screens
+    for (let i = 0; i < items.length; i += 2) {
+      const item1 = items[i];
+      const item2 = items[i + 1];
+      
+      const rowContents: any[] = [
+        {
+          type: "button",
+          style: "secondary",
+          height: "sm",
+          action: {
+            type: "message",
+            label: item1.name,
+            text: item1.actionText
+          }
+        }
+      ];
+      
+      if (item2) {
+        rowContents.push({
+          type: "button",
+          style: "secondary",
+          height: "sm",
+          action: {
+            type: "message",
+            label: item2.name,
+            text: item2.actionText
+          },
+          margin: "sm"
+        });
+      } else {
+        rowContents.push({
+          type: "spacer",
+          size: "sm"
+        });
+      }
+      
+      rows.push({
+        type: "box",
+        layout: "horizontal",
+        margin: "xs",
+        contents: rowContents
+      });
+    }
+
+    return {
+      type: "flex",
+      altText: flexContent.title,
+      contents: {
+        type: "bubble",
+        size: "mega",
+        header: {
+          type: "box",
+          layout: "vertical",
+          backgroundColor: "#1DB446",
+          contents: [
+            {
+              type: "text",
+              text: flexContent.title,
+              weight: "bold",
+              color: "#FFFFFF",
+              size: "md"
+            }
+          ]
+        },
+        body: {
+          type: "box",
+          layout: "vertical",
+          contents: [
+            {
+              type: "text",
+              text: flexContent.description,
+              wrap: true,
+              size: "xs",
+              color: "#555555"
+            },
+            {
+              type: "box",
+              layout: "vertical",
+              margin: "md",
+              spacing: "xs",
+              contents: rows
+            }
+          ]
+        }
+      }
+    };
+  }
+
+  // Fallback to text message
+  return {
+    type: "text",
+    text: result.text || 'รับทราบคำสั่งค่ะ!'
+  };
+}
+
+
 // A. Real LINE Webhook Endpoint (For production messaging integration!)
 app.post('/api/line-webhook', async (req, res) => {
   try {
@@ -536,21 +640,28 @@ app.post('/api/line-webhook', async (req, res) => {
     for (const event of events) {
       if (event.type === 'message') {
         const replyToken = event.replyToken;
-        let botResponseText = '';
+        let lineMessagePayload: any = null;
+        let originalResult: any = null;
 
         if (event.message.type === 'text') {
-          const result = await processBotMessage(event.message.text);
-          botResponseText = result.text || 'รับทราบคำสั่งค่ะ!';
+          originalResult = await processBotMessage(event.message.text);
+          lineMessagePayload = buildLineMessage(originalResult);
         } else if (event.message.type === 'file') {
           // Real LINE SDK downloading of binary files is supported here!
-          botResponseText = '📁 ได้รับไฟล์จาก LINE เรียบร้อยแล้ว ระบบกำลังนำเข้าข้อมูลการขายเพื่อหักสต๊อกตามขั้นตอน...';
+          lineMessagePayload = {
+            type: 'text',
+            text: '📁 ได้รับไฟล์จาก LINE เรียบร้อยแล้ว ระบบกำลังนำเข้าข้อมูลการขายเพื่อหักสต๊อกตามขั้นตอน...'
+          };
         } else {
-          botResponseText = 'ขออภัยค่ะ ระบบสามารถตรวจสอบคำสั่งแบบข้อความตัวอักษรและไฟล์ Excel ยอดขายเท่านั้นค่ะ';
+          lineMessagePayload = {
+            type: 'text',
+            text: 'ขออภัยค่ะ ระบบสามารถตรวจสอบคำสั่งแบบข้อความตัวอักษรและไฟล์ Excel ยอดขายเท่านั้นค่ะ'
+          };
         }
 
         // Send actual LINE response back using fetch to LINE API if configured
-        if (process.env.LINE_CHANNEL_ACCESS_TOKEN && replyToken) {
-          await fetch('https://api.line.me/v2/bot/message/reply', {
+        if (process.env.LINE_CHANNEL_ACCESS_TOKEN && replyToken && lineMessagePayload) {
+          const response = await fetch('https://api.line.me/v2/bot/message/reply', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -558,9 +669,34 @@ app.post('/api/line-webhook', async (req, res) => {
             },
             body: JSON.stringify({
               replyToken,
-              messages: [{ type: 'text', text: botResponseText }]
+              messages: [lineMessagePayload]
             })
           });
+
+          if (!response.ok) {
+            const errText = await response.text();
+            console.error('LINE Reply API error:', errText, 'Payload was:', JSON.stringify(lineMessagePayload));
+
+            // FALLBACK: If the Flex Message payload had any validation issue, immediately send a clean text response so user gets their choices!
+            if (lineMessagePayload.type === 'flex' && originalResult) {
+              const fallbackText = `📌 ${originalResult.flexContent.title}\n${originalResult.flexContent.description}\n\nพิมพ์สั่งงาน เช่น:\n- เติม ชีส 10\n- คงเหลือ แซลมอน 15`;
+              
+              await fetch('https://api.line.me/v2/bot/message/reply', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`
+                },
+                body: JSON.stringify({
+                  replyToken,
+                  messages: [{
+                    type: 'text',
+                    text: fallbackText
+                  }]
+                })
+              });
+            }
+          }
         }
       }
     }
