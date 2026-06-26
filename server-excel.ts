@@ -28,6 +28,63 @@ function autofitColumns(ws: XLSX.WorkSheet) {
   ws['!cols'] = cols;
 }
 
+// Helper to style a worksheet with high visual appeal (Titles, Merges, Heights, Formats)
+function styleWorksheet(
+  ws: XLSX.WorkSheet, 
+  title: string, 
+  subtitle: string, 
+  dataStartRow: number, 
+  numCols: number,
+  numericColIndices: number[]
+) {
+  // 1. Setup Merges for Title and Subtitle
+  ws['!merges'] = [
+    { s: { r: 0, c: 0 }, e: { r: 0, c: numCols - 1 } },
+    { s: { r: 1, c: 0 }, e: { r: 1, c: numCols - 1 } }
+  ];
+
+  // 2. Set Row Heights (spacious and modern padding)
+  const range = XLSX.utils.decode_range(ws['!ref'] || 'A1:A5');
+  const rowHeights: XLSX.RowInfo[] = [];
+  rowHeights.push({ hpt: 35 }); // Title row
+  rowHeights.push({ hpt: 20 }); // Subtitle row
+  rowHeights.push({ hpt: 12 }); // Empty spacer row
+  rowHeights.push({ hpt: 28 }); // Table headers (tall & robust)
+  
+  for (let r = 4; r <= range.e.r; r++) {
+    // Check if it's the last row (Total row)
+    if (r === range.e.r) {
+      rowHeights.push({ hpt: 28 }); // Total row (tall & robust)
+    } else {
+      rowHeights.push({ hpt: 22 }); // Standard data row (comfortable padding)
+    }
+  }
+  ws['!rows'] = rowHeights;
+
+  // 3. Format Cell Numbers & Formulas
+  for (let r = range.s.r; r <= range.e.r; r++) {
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      const cellRef = XLSX.utils.encode_cell({ r, c });
+      const cell = ws[cellRef];
+      if (!cell) continue;
+
+      // Format numeric data columns starting from row idx 4 (5th Excel row)
+      if (r >= 4 && numericColIndices.includes(c)) {
+        if (typeof cell.v === 'number') {
+          cell.t = 'n';
+          cell.z = '#,##0.00'; // Formatted with commas and 2 decimals (e.g. 1,234.50)
+        } else if (cell.f) {
+          cell.t = 'n';
+          cell.z = '#,##0.00'; // Keep formulas as numeric formatted as well
+        }
+      }
+    }
+  }
+
+  // 4. Auto-fit column widths
+  autofitColumns(ws);
+}
+
 // Generate a buffer for the multi-sheet Excel report
 export function generateExcelReport(
   inventory: any[],
@@ -39,78 +96,241 @@ export function generateExcelReport(
 ) {
   const wb = XLSX.utils.book_new();
 
-  // 1. Sheet: สรุปผลต่างและการเปรียบเทียบ (Discrepancy Report)
-  const compData = discrepancyReport.map(row => ({
-    'วันที่': row.date,
-    'วัตถุดิบ': row.nameThai,
-    'คงเหลือยกมา (เมื่อวาน)': row.yesterdayCount,
-    'เติมสต๊อก (+)': row.replenished,
-    'ยอดขายตามระบบ (-)': row.sold,
-    'คงเหลือตามทฤษฎี (สูตร)': row.expectedRemaining,
-    'คงเหลือนับจริง': row.actualRemaining,
-    'ผลต่าง (หายไป / เกิน)': row.difference === 0 ? 'ตรงกัน (0)' : row.difference > 0 ? `หายไป -${row.difference}` : `เกินมา +${Math.abs(row.difference)}`,
-    'หมายเหตุประจำวัน': row.remark || '',
-  }));
-  const wsComp = XLSX.utils.json_to_sheet(compData);
-  autofitColumns(wsComp);
+  // -------------------------------------------------------------------------
+  // 1. Sheet: เปรียบเทียบยอดขายและคงเหลือ (Discrepancy Report)
+  // -------------------------------------------------------------------------
+  const compRows: any[][] = [
+    [`📊 รายงานเปรียบเทียบยอดขายและสต๊อกคงเหลือร้านอาหาร (Discrepancy Report)`],
+    [`📅 วันที่รายงาน: ${date}  |  🕒 ออกรายงานเมื่อ: ${new Date().toLocaleString('th-TH')}  |  📍 ระบบสต๊อกอัตโนมัติ`],
+    [], // Spacer
+    [
+      'วันที่',
+      'วัตถุดิบ / ส่วนผสม',
+      'คงเหลือยกมา (เมื่อวาน)',
+      'เติมสต๊อก (+)',
+      'ยอดขายตามระบบ (-)',
+      'คงเหลือตามทฤษฎี (สูตร)',
+      'คงเหลือนับจริง',
+      'ผลต่าง (หายไป / เกิน)',
+      'หมายเหตุประจำวัน / หน้าครึ่ง'
+    ]
+  ];
+
+  discrepancyReport.forEach(row => {
+    const diffText = row.difference === 0 
+      ? '🟢 ตรงกัน (0)' 
+      : row.difference > 0 
+        ? `❌ หายไป -${row.difference}` 
+        : `⚠️ เกินมา +${Math.abs(row.difference)}`;
+
+    compRows.push([
+      row.date,
+      row.nameThai,
+      row.yesterdayCount,
+      row.replenished,
+      row.sold,
+      row.expectedRemaining,
+      row.actualRemaining,
+      diffText,
+      row.remark || ''
+    ]);
+  });
+
+  // Totals Row with Excel formulas!
+  const compDataStart = 5; // row index 4, which is row 5 in Excel (1-indexed)
+  const compDataEnd = compDataStart + discrepancyReport.length - 1;
+  compRows.push([
+    'รวมยอดสต๊อกทั้งหมด (Total)',
+    '',
+    { f: `SUM(C${compDataStart}:C${compDataEnd})` },
+    { f: `SUM(D${compDataStart}:D${compDataEnd})` },
+    { f: `SUM(E${compDataStart}:E${compDataEnd})` },
+    { f: `SUM(F${compDataStart}:F${compDataEnd})` },
+    { f: `SUM(G${compDataStart}:G${compDataEnd})` },
+    '', // Text status
+    ''
+  ]);
+
+  const wsComp = XLSX.utils.aoa_to_sheet(compRows);
+  // Numeric columns are C (2), D (3), E (4), F (5), G (6)
+  styleWorksheet(wsComp, 'Discrepancy Report', date, compDataStart, 9, [2, 3, 4, 5, 6]);
   XLSX.utils.book_append_sheet(wb, wsComp, 'เปรียบเทียบยอดขายและคงเหลือ');
 
+
+  // -------------------------------------------------------------------------
   // 2. Sheet: สต๊อกคงเหลือปัจจุบัน (Current Inventory)
-  const invData = inventory.map(item => ({
-    'รหัสวัตถุดิบ': item.code,
-    'ชื่อวัตถุดิบ': item.nameThai,
-    'จำนวนคงเหลือในระบบ': item.currentQty,
-    'หน่วย': item.unit,
-  }));
-  const wsInv = XLSX.utils.json_to_sheet(invData);
-  autofitColumns(wsInv);
+  // -------------------------------------------------------------------------
+  const invRows: any[][] = [
+    [`📋 บัญชีรายการสต๊อกคงเหลือปัจจุบันในระบบ (Current Inventory)`],
+    [`📅 ประจำวันที่: ${date}  |  🕒 ข้อมูลอัปเดต ณ ปัจจุบัน`],
+    [], // Spacer
+    [
+      'รหัสวัตถุดิบ',
+      'ชื่อวัตถุดิบ / ส่วนผสม',
+      'จำนวนคงเหลือในระบบ',
+      'หน่วยสินค้า'
+    ]
+  ];
+
+  inventory.forEach(item => {
+    invRows.push([
+      item.code,
+      item.nameThai,
+      item.currentQty,
+      item.unit
+    ]);
+  });
+
+  const invDataStart = 5;
+  const invDataEnd = invDataStart + inventory.length - 1;
+  invRows.push([
+    'รวมคงเหลือวัตถุดิบทั้งหมด',
+    '',
+    { f: `SUM(C${invDataStart}:C${invDataEnd})` },
+    ''
+  ]);
+
+  const wsInv = XLSX.utils.aoa_to_sheet(invRows);
+  // Numeric column is C (2)
+  styleWorksheet(wsInv, 'Current Inventory', date, invDataStart, 4, [2]);
   XLSX.utils.book_append_sheet(wb, wsInv, 'สต๊อกคงเหลือปัจจุบัน');
 
+
+  // -------------------------------------------------------------------------
   // 3. Sheet: ข้อมูลการเติมสต๊อก (Replenishments)
-  const repData = replenishments.map(row => {
-    const item = STOCK_ITEMS_MAP[row.itemCode] || { nameThai: row.itemCode, unit: '' };
-    return {
-      'รหัสวัตถุดิบ': row.itemCode,
-      'ชื่อวัตถุดิบ': item.nameThai,
-      'จำนวนที่เติม': row.qty,
-      'หน่วย': item.unit,
-      'วันเวลาที่เติม': new Date(row.timestamp).toLocaleString('th-TH'),
-    };
+  // -------------------------------------------------------------------------
+  const repRows: any[][] = [
+    [`📥 ประวัติรายการทำรายการเติมสต๊อกวัตถุดิบ (Replenishments History)`],
+    [`📅 ข้อมูลบันทึกประวัติสะสมทั้งหมดในระบบ`],
+    [], // Spacer
+    [
+      'รหัสวัตถุดิบ',
+      'ชื่อวัตถุดิบ',
+      'จำนวนที่เติมวัตถุดิบ',
+      'หน่วยสินค้า',
+      'วันเวลาที่ทำการเติมสต๊อก'
+    ]
+  ];
+
+  replenishments.forEach(row => {
+    const item = STOCK_ITEMS_MAP[row.itemCode] || { nameThai: row.itemCode, unit: 'ยูนิต' };
+    repRows.push([
+      row.itemCode,
+      item.nameThai,
+      row.qty,
+      item.unit,
+      new Date(row.timestamp).toLocaleString('th-TH')
+    ]);
   });
-  const wsRep = XLSX.utils.json_to_sheet(repData);
-  autofitColumns(wsRep);
+
+  const repDataStart = 5;
+  const repDataEnd = repDataStart + replenishments.length - 1;
+  if (replenishments.length > 0) {
+    repRows.push([
+      'รวมการเติมวัตถุดิบทั้งหมด',
+      '',
+      { f: `SUM(C${repDataStart}:C${repDataEnd})` },
+      '',
+      ''
+    ]);
+  }
+
+  const wsRep = XLSX.utils.aoa_to_sheet(repRows);
+  styleWorksheet(wsRep, 'Replenishments History', date, repDataStart, 5, [2]);
   XLSX.utils.book_append_sheet(wb, wsRep, 'ประวัติการเติมสต๊อก');
 
+
+  // -------------------------------------------------------------------------
   // 4. Sheet: ข้อมูลคงเหลือรายวัน (Daily Counts)
-  const cntData = dailyCounts.map(row => {
-    const item = STOCK_ITEMS_MAP[row.itemCode] || { nameThai: row.itemCode, unit: '' };
-    return {
-      'วันที่ตรวจเช็ค': row.date,
-      'รหัสวัตถุดิบ': row.itemCode,
-      'ชื่อวัตถุดิบ': item.nameThai,
-      'จำนวนคงเหลือเช็คจริง': row.qty,
-      'หน่วย': item.unit,
-      'วันเวลาที่บันทึกเช็ค': new Date(row.timestamp).toLocaleString('th-TH'),
-    };
+  // -------------------------------------------------------------------------
+  const cntRows: any[][] = [
+    [`📝 ยอดสต๊อกคงเหลือนับจริงรายวันหน้าเครื่อง (Daily Physical Counts)`],
+    [`📅 ข้อมูลรายงานตรวจสอบนับจริงสะสม`],
+    [], // Spacer
+    [
+      'วันที่เช็คสต๊อก',
+      'รหัสวัตถุดิบ',
+      'ชื่อวัตถุดิบ',
+      'จำนวนนับจริง',
+      'หน่วยสินค้า',
+      'วันเวลาที่ลงบันทึกนับสต๊อก'
+    ]
+  ];
+
+  dailyCounts.forEach(row => {
+    const item = STOCK_ITEMS_MAP[row.itemCode] || { nameThai: row.itemCode, unit: 'ยูนิต' };
+    cntRows.push([
+      row.date,
+      row.itemCode,
+      item.nameThai,
+      row.qty,
+      item.unit,
+      new Date(row.timestamp).toLocaleString('th-TH')
+    ]);
   });
-  const wsCnt = XLSX.utils.json_to_sheet(cntData);
-  autofitColumns(wsCnt);
+
+  const cntDataStart = 5;
+  const cntDataEnd = cntDataStart + dailyCounts.length - 1;
+  if (dailyCounts.length > 0) {
+    cntRows.push([
+      'รวมสต๊อกนับจริงทั้งหมด',
+      '',
+      '',
+      { f: `SUM(D${cntDataStart}:D${cntDataEnd})` },
+      '',
+      ''
+    ]);
+  }
+
+  const wsCnt = XLSX.utils.aoa_to_sheet(cntRows);
+  styleWorksheet(wsCnt, 'Daily Physical Counts', date, cntDataStart, 6, [3]);
   XLSX.utils.book_append_sheet(wb, wsCnt, 'ยอดคงเหลือรายวัน');
 
+
+  // -------------------------------------------------------------------------
   // 5. Sheet: ข้อมูลการขายรายวัน (Sales)
-  const saleData = sales.map(row => {
-    const item = STOCK_ITEMS_MAP[row.itemCode] || { nameThai: row.itemCode, unit: '' };
-    return {
-      'วันที่ขาย': row.date,
-      'รหัสวัตถุดิบ': row.itemCode,
-      'ชื่อวัตถุดิบ': item.nameThai,
-      'จำนวนวัตถุดิบที่ใช้': row.qty,
-      'หน่วย': item.unit,
-      'วันเวลาที่บันทึกขาย': new Date(row.timestamp).toLocaleString('th-TH'),
-    };
+  // -------------------------------------------------------------------------
+  const saleRows: any[][] = [
+    [`📈 สรุปรายการหักตัดยอดวัตถุดิบจากยอดขายรายวัน (Sales Deduction)`],
+    [`📅 รายงานบันทึกการหักตัดจำหน่ายสะสม`],
+    [], // Spacer
+    [
+      'วันที่ขายสินค้า',
+      'รหัสวัตถุดิบ',
+      'ชื่อวัตถุดิบ',
+      'จำนวนที่หักสต๊อกตามยอดขาย',
+      'หน่วยสินค้า',
+      'วันเวลาประมวลผลตัดสต๊อก'
+    ]
+  ];
+
+  sales.forEach(row => {
+    const item = STOCK_ITEMS_MAP[row.itemCode] || { nameThai: row.itemCode, unit: 'ยูนิต' };
+    saleRows.push([
+      row.date,
+      row.itemCode,
+      item.nameThai,
+      row.qty,
+      item.unit,
+      new Date(row.timestamp).toLocaleString('th-TH')
+    ]);
   });
-  const wsSale = XLSX.utils.json_to_sheet(saleData);
-  autofitColumns(wsSale);
+
+  const saleDataStart = 5;
+  const saleDataEnd = saleDataStart + sales.length - 1;
+  if (sales.length > 0) {
+    saleRows.push([
+      'รวมตัดขายสะสมทั้งหมด',
+      '',
+      '',
+      { f: `SUM(D${saleDataStart}:D${saleDataEnd})` },
+      '',
+      ''
+    ]);
+  }
+
+  const wsSale = XLSX.utils.aoa_to_sheet(saleRows);
+  styleWorksheet(wsSale, 'Sales Deduction', date, saleDataStart, 6, [3]);
   XLSX.utils.book_append_sheet(wb, wsSale, 'ยอดขายรายวัน');
 
   // Return a buffer
@@ -174,7 +394,33 @@ export function parseSalesExcel(fileBuffer: Buffer): Record<string, number> {
 
     if (bestQty <= 0) continue;
 
-    // A. Check for DIRECT CODE MATCH (Template Mode)
+    // A.1. DIRECT THAI NAME MATCH (If the user uploads a direct list of Thai ingredient names like "ชีส", "แฮม")
+    let matchedThaiCode = '';
+    for (const cellStr of cellStrings) {
+      const cleanCell = cellStr.trim().toLowerCase();
+      if (!cleanCell) continue;
+
+      const matched = STOCK_ITEMS_LIST.find(item => 
+        item.nameThai.trim().toLowerCase() === cleanCell ||
+        (item.code === 'french_fries' && (cleanCell.includes('เฟรนฟราย') || cleanCell.includes('เฟรนช์ฟราย'))) ||
+        (item.code === 'banana_samosa' && cleanCell.includes('ซาโมซ่า')) ||
+        (item.code === 'beef_salami' && cleanCell.includes('ซาลามี่')) ||
+        (item.code === 'beef_steak' && cleanCell.includes('สเต็กเนื้อ')) ||
+        (item.code === 'pork_chop' && (cleanCell.includes('พ็อกชอป') || cleanCell.includes('พอร์คชอป') || cleanCell.includes('พอร์คช็อป'))) ||
+        (item.code === 'seafood_set' && (cleanCell === 'ทะเล' || cleanCell === 'ชุดทะเล'))
+      );
+      if (matched) {
+        matchedThaiCode = matched.code;
+        break;
+      }
+    }
+
+    if (matchedThaiCode) {
+      salesMap[matchedThaiCode] += bestQty;
+      continue;
+    }
+
+    // A.2. DIRECT ENGLISH CODE MATCH (Template Mode)
     let matchedDirectCode = '';
     for (const cellStr of cellStrings) {
       const cleanCell = cellStr.toLowerCase();

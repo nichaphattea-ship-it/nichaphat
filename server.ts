@@ -821,11 +821,43 @@ app.post('/api/line-webhook', async (req, res) => {
           originalResult = await processBotMessage(event.message.text, undefined, undefined, userId);
           lineMessagePayload = buildLineMessage(originalResult);
         } else if (event.message.type === 'file') {
-          // Real LINE SDK downloading of binary files is supported here!
-          lineMessagePayload = {
-            type: 'text',
-            text: '📁 ได้รับไฟล์จาก LINE เรียบร้อยแล้ว ระบบกำลังนำเข้าข้อมูลการขายเพื่อหักสต๊อกตามขั้นตอน...'
-          };
+          const userId = event.source?.userId || 'default';
+          const messageId = event.message.id;
+          const fileName = event.message.fileName || 'sales.xlsx';
+          
+          if (process.env.LINE_CHANNEL_ACCESS_TOKEN) {
+            try {
+              const fileRes = await fetch(`https://api-data.line.me/v2/bot/message/${messageId}/content`, {
+                headers: {
+                  'Authorization': `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`
+                }
+              });
+              if (fileRes.ok) {
+                const arrayBuf = await fileRes.arrayBuffer();
+                const fileBuf = Buffer.from(arrayBuf);
+                originalResult = await processBotMessage('', fileBuf, fileName, userId);
+                lineMessagePayload = buildLineMessage(originalResult);
+              } else {
+                const errText = await fileRes.text();
+                console.error('Error downloading from LINE API:', errText);
+                lineMessagePayload = {
+                  type: 'text',
+                  text: '❌ ไม่สามารถดาวน์โหลดไฟล์การขายจาก LINE ได้สำเร็จ กรุณาลองอัปโหลดใหม่อีกครั้งค่ะ'
+                };
+              }
+            } catch (err: any) {
+              console.error('Error in LINE file download:', err);
+              lineMessagePayload = {
+                type: 'text',
+                text: `❌ เกิดข้อผิดพลาดขณะดาวน์โหลดและบันทึกไฟล์: ${err.message}`
+              };
+            }
+          } else {
+            lineMessagePayload = {
+              type: 'text',
+              text: '⚠️ บอทยังไม่ได้กำหนด LINE_CHANNEL_ACCESS_TOKEN ในแถบ Secret ของระบบ แอดมินกรุณาตั้งค่าก่อนการประมวลผลไฟล์ค่ะ'
+            };
+          }
         } else {
           lineMessagePayload = {
             type: 'text',
