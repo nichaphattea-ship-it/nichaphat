@@ -278,19 +278,30 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
                     <div className="max-h-48 overflow-y-auto p-1 bg-gray-50/50 scrollbar-thin">
                       {msg.flexContent?.items?.map((item: any) => (
                         <button
-                          key={item.code}
+                          key={item.code || item.name}
                           onClick={() => {
                             if (msg.id === messages[messages.length - 1].id) {
-                              handleItemSelectInMenu(item);
+                              if (item.actionText && (msg.flexContent?.title?.includes('หมายเหตุ') || !item.unit)) {
+                                handleSendMessage(item.actionText);
+                              } else {
+                                handleItemSelectInMenu(item);
+                              }
                             }
                           }}
                           className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-emerald-50 rounded-lg flex items-center justify-between border-b border-gray-100/50 transition-colors"
                         >
                           <span className="font-medium text-gray-700">{item.name}</span>
-                          <span className="text-[10px] text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded font-mono flex items-center gap-1">
-                            {item.unit}
-                            <ChevronRight className="w-2.5 h-2.5 text-gray-400" />
-                          </span>
+                          {item.unit ? (
+                            <span className="text-[10px] text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded font-mono flex items-center gap-1">
+                              {item.unit}
+                              <ChevronRight className="w-2.5 h-2.5 text-gray-400" />
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
+                              กดด่วน
+                              <ChevronRight className="w-2.5 h-2.5 text-emerald-500" />
+                            </span>
+                          )}
                         </button>
                       ))}
                     </div>

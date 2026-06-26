@@ -318,7 +318,7 @@ function extractDateFromText(text: string, defaultDate: string): { date: string;
 
 // User state to remember selection context for interactive chat flow
 interface UserState {
-  pendingAction: 'replenish' | 'count';
+  pendingAction: 'replenish' | 'count' | 'note_add' | 'note_sub';
   itemCode: string;
   itemName: string;
   date: string;
@@ -348,31 +348,66 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
       const action = state.pendingAction;
       const actionDate = state.date || targetDate;
 
-      // Clear the pending state once successfully processed
-      userStates.delete(userId);
+      if (action === 'replenish' || action === 'count') {
+        // Clear the pending state once successfully processed
+        userStates.delete(userId);
 
-      if (action === 'replenish') {
-        await replenishStock(itemCode, qty, actionDate);
-        const updatedInv = await getInventory();
-        const current = updatedInv.find(i => i.code === itemCode)?.currentQty || 0;
-        const matchedItem = STOCK_ITEMS_LIST.find(i => i.code === itemCode);
-        const unit = matchedItem ? matchedItem.unit : 'ยูนิต';
+        if (action === 'replenish') {
+          await replenishStock(itemCode, qty, actionDate);
+          const updatedInv = await getInventory();
+          const current = updatedInv.find(i => i.code === itemCode)?.currentQty || 0;
+          const matchedItem = STOCK_ITEMS_LIST.find(i => i.code === itemCode);
+          const unit = matchedItem ? matchedItem.unit : 'ยูนิต';
 
-        return {
-          type: 'text',
-          text: `✅ เติมสต๊อกสำเร็จสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ${itemName}\nจำนวนที่เพิ่ม: +${qty} ${unit}\nยอดคงเหลือรวมล่าสุด: ${current} ${unit}`
-        };
-      } else if (action === 'count') {
-        await recordDailyCount(itemCode, qty, actionDate);
-        const matchedItem = STOCK_ITEMS_LIST.find(i => i.code === itemCode);
-        const unit = matchedItem ? matchedItem.unit : 'ยูนิต';
+          return {
+            type: 'text',
+            text: `✅ เติมสต๊อกสำเร็จสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ${itemName}\nจำนวนที่เพิ่ม: +${qty} ${unit}\nยอดคงเหลือรวมล่าสุด: ${current} ${unit}`
+          };
+        } else if (action === 'count') {
+          await recordDailyCount(itemCode, qty, actionDate);
+          const matchedItem = STOCK_ITEMS_LIST.find(i => i.code === itemCode);
+          const unit = matchedItem ? matchedItem.unit : 'ยูนิต';
 
-        return {
-          type: 'text',
-          text: `✅ บันทึกยอดคงเหลือจริงสำเร็จสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ${itemName}\nจำนวนที่นับได้จริง: ${qty} ${unit}\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`
-        };
+          return {
+            type: 'text',
+            text: `✅ บันทึกยอดคงเหลือจริงสำเร็จสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ${itemName}\nจำนวนที่นับได้จริง: ${qty} ${unit}\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`
+          };
+        }
       }
     }
+  }
+
+  // 1.6. Intercept pizza name if user has a pending note action (like note_add or note_sub)
+  const pendingState = userStates.get(userId);
+  if (pendingState && (pendingState.pendingAction === 'note_add' || pendingState.pendingAction === 'note_sub')) {
+    const pizzaName = cleanText;
+    const isAdd = pendingState.pendingAction === 'note_add';
+    const cheeseAdjust = 0.25;
+    const actionDate = pendingState.date || targetDate;
+
+    // Clear the pending state once successfully processed
+    userStates.delete(userId);
+
+    if (isAdd) {
+      // Increase cheese count
+      await replenishStock('cheese', cheeseAdjust, actionDate);
+    } else {
+      // Decrease cheese count (recorded as sales of cheese)
+      const salesMap: Record<string, number> = {};
+      STOCK_ITEMS_LIST.forEach(item => {
+        salesMap[item.code] = 0;
+      });
+      salesMap['cheese'] = cheeseAdjust;
+      await recordSales(actionDate, salesMap);
+    }
+
+    const updatedInv = await getInventory();
+    const current = updatedInv.find(i => i.code === 'cheese')?.currentQty || 0;
+
+    return {
+      type: 'text',
+      text: `📝 บันทึกหมายเหตุ "${pizzaName}" เรียบร้อยแล้วสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ชีส (Cheese)\nการปรับสต๊อก: ${isAdd ? 'เพิ่มชีส (+)' : 'ลดชีส (-)'} ${cheeseAdjust} ยูนิต\nยอดคงเหลือชีสล่าสุด: ${current} ยูนิต`
+    };
   }
 
   // 1. Handle File Upload (Sales Excel uploaded via LINE)
@@ -610,11 +645,46 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     };
   }
 
+  // 6.6. Partial Match for: หมายเหตุ [เพิ่ม|ลด] (without pizza name specified)
+  const partialNoteRegex = /^(หมายเหตุ|remark|note)\s+(เพิ่ม|ลด|add|sub|remove)\s*$/i;
+  const partNoteMatch = cleanText.match(partialNoteRegex);
+  if (partNoteMatch) {
+    const direction = partNoteMatch[2].trim().toLowerCase();
+    const isAdd = direction === 'เพิ่ม' || direction === 'add';
+
+    // Save pending state
+    userStates.set(userId, {
+      pendingAction: isAdd ? 'note_add' : 'note_sub',
+      itemCode: 'cheese',
+      itemName: 'ชีส',
+      date: targetDate
+    });
+
+    return {
+      type: 'text',
+      text: `✍️ บันทึกเลือก ${isAdd ? 'เพิ่มชีส (+0.25)' : 'ลดชีส (-0.25)'} สำหรับหน้าครึ่ง\n\n👉 กรุณาพิมพ์ "ชื่อพิซซ่า" ที่ต้องการระบุเข้ามาได้เลยค่ะ (เช่น "ฮาวายเอี้ยน" หรือ "ซีฟู้ด")`
+    };
+  }
+
   // Support sending just "หมายเหตุ"
   if (cleanText === 'หมายเหตุ') {
     return {
-      type: 'text',
-      text: `📝 เมนูหมายเหตุพิเศษ (พิซซ่าหน้าครึ่ง)\n\nกรุณาพิมพ์เพื่อสั่งปรับสต๊อกชีสทีละ 0.25 ยูนิต:\n- "หมายเหตุ เพิ่ม [ชื่อพิซซ่า]" (เพื่อเพิ่มชีส)\n- "หมายเหตุ ลด [ชื่อพิซซ่า]" (เพื่อลดชีส)\n\nหรือใช้ปุ่มกดด่วนในแถบ Rich Menu ได้เลยค่ะ!`
+      type: 'flex',
+      text: '📝 เมนูหมายเหตุพิเศษ (พิซซ่าหน้าครึ่ง)',
+      flexContent: {
+        title: '📝 หมายเหตุพิเศษ (พิซซ่าหน้าครึ่ง)',
+        description: 'เลือกประเภทการปรับสต๊อกชีสทีละ 0.25 ยูนิต หรือพิมพ์: หมายเหตุ [เพิ่ม/ลด] [ชื่อพิซซ่า]',
+        items: [
+          {
+            name: '➕ เพิ่มชีส (+0.25)',
+            actionText: 'หมายเหตุ เพิ่ม'
+          },
+          {
+            name: '➖ ลดชีส (-0.25)',
+            actionText: 'หมายเหตุ ลด'
+          }
+        ]
+      }
     };
   }
 
