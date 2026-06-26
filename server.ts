@@ -316,14 +316,63 @@ function extractDateFromText(text: string, defaultDate: string): { date: string;
   return { date, cleanText: remainingText };
 }
 
+// User state to remember selection context for interactive chat flow
+interface UserState {
+  pendingAction: 'replenish' | 'count';
+  itemCode: string;
+  itemName: string;
+  date: string;
+}
+
+const userStates = new Map<string, UserState>();
+
 // Helper to handle bot commands dynamically (used by both REAL Webhook and Simulator!)
-async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string): Promise<any> {
+async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string, userId: string = 'default'): Promise<any> {
   const todayStr = new Date().toISOString().split('T')[0];
   const { date: targetDate, cleanText: extractedCleanText } = extractDateFromText(messageText, todayStr);
   
   let cleanText = extractedCleanText.trim();
   if (!cleanText && messageText.trim()) {
     cleanText = messageText.trim();
+  }
+
+  // 1.5. Intercept pure numbers or numbers with trailing units if user has a pending action
+  const numberOnlyRegex = /^\s*(\d+(\.\d+)?)\s*(ยูนิต|ถุง|ฟอง|กิโล|กรัม|ชิ้น|กล่อง|แพ็ค|แพค|อัน|ขวด|ซอง|กระป๋อง|g|kg|pcs|units|unit)?\s*$/i;
+  const numMatch = cleanText.match(numberOnlyRegex);
+  if (numMatch) {
+    const qty = parseFloat(numMatch[1]);
+    const state = userStates.get(userId);
+    if (state) {
+      const itemCode = state.itemCode;
+      const itemName = state.itemName;
+      const action = state.pendingAction;
+      const actionDate = state.date || targetDate;
+
+      // Clear the pending state once successfully processed
+      userStates.delete(userId);
+
+      if (action === 'replenish') {
+        await replenishStock(itemCode, qty, actionDate);
+        const updatedInv = await getInventory();
+        const current = updatedInv.find(i => i.code === itemCode)?.currentQty || 0;
+        const matchedItem = STOCK_ITEMS_LIST.find(i => i.code === itemCode);
+        const unit = matchedItem ? matchedItem.unit : 'ยูนิต';
+
+        return {
+          type: 'text',
+          text: `✅ เติมสต๊อกสำเร็จสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ${itemName}\nจำนวนที่เพิ่ม: +${qty} ${unit}\nยอดคงเหลือรวมล่าสุด: ${current} ${unit}`
+        };
+      } else if (action === 'count') {
+        await recordDailyCount(itemCode, qty, actionDate);
+        const matchedItem = STOCK_ITEMS_LIST.find(i => i.code === itemCode);
+        const unit = matchedItem ? matchedItem.unit : 'ยูนิต';
+
+        return {
+          type: 'text',
+          text: `✅ บันทึกยอดคงเหลือจริงสำเร็จสำหรับวันที่ ${actionDate}!\nวัตถุดิบ: ${itemName}\nจำนวนที่นับได้จริง: ${qty} ${unit}\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`
+        };
+      }
+    }
   }
 
   // 1. Handle File Upload (Sales Excel uploaded via LINE)
@@ -460,9 +509,17 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     );
 
     if (matchedItem) {
+      // Save pending state
+      userStates.set(userId, {
+        pendingAction: 'replenish',
+        itemCode: matchedItem.code,
+        itemName: matchedItem.nameThai,
+        date: targetDate
+      });
+
       return {
         type: 'text',
-        text: `✍️ คุณเลือกเติม "${matchedItem.nameThai}" เรียบร้อยค่ะ!\nกรุณาพิมพ์ระบุจำนวนที่ต้องการเติมต่อท้ายได้เลย เช่น:\n\nเติม ${matchedItem.nameThai} 10`
+        text: `✍️ บันทึกเลือกเติมวัตถุดิบ: "${matchedItem.nameThai}"\n\n👉 กรุณาพิมพ์ระบุเฉพาะ "จำนวน" ที่ต้องการเติมตอบกลับมาได้เลยค่ะ (เช่น "10" หรือ "15.5")`
       };
     }
   }
@@ -507,9 +564,17 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     );
 
     if (matchedItem) {
+      // Save pending state
+      userStates.set(userId, {
+        pendingAction: 'count',
+        itemCode: matchedItem.code,
+        itemName: matchedItem.nameThai,
+        date: targetDate
+      });
+
       return {
         type: 'text',
-        text: `✍️ คุณเลือกบันทึกคงเหลือ "${matchedItem.nameThai}" เรียบร้อยค่ะ!\nกรุณาพิมพ์ระบุจำนวนที่นับได้จริงต่อท้ายได้เลย เช่น:\n\nคงเหลือ ${matchedItem.nameThai} 45`
+        text: `✍️ บันทึกเลือกคงเหลือจริง: "${matchedItem.nameThai}"\n\n👉 กรุณาพิมพ์ระบุเฉพาะ "จำนวนคงเหลือจริง" ที่นับได้วันนี้ส่งกลับมาได้เลยค่ะ (เช่น "45" หรือ "8")`
       };
     }
   }
@@ -682,7 +747,8 @@ app.post('/api/line-webhook', async (req, res) => {
         let originalResult: any = null;
 
         if (event.message.type === 'text') {
-          originalResult = await processBotMessage(event.message.text);
+          const userId = event.source?.userId || 'default';
+          originalResult = await processBotMessage(event.message.text, undefined, undefined, userId);
           lineMessagePayload = buildLineMessage(originalResult);
         } else if (event.message.type === 'file') {
           // Real LINE SDK downloading of binary files is supported here!
@@ -754,9 +820,9 @@ app.post('/api/simulator/message', upload.single('file'), async (req, res) => {
 
     if (req.file) {
       // User uploaded a sales Excel file through the chat simulator!
-      response = await processBotMessage(text, req.file.buffer, req.file.originalname);
+      response = await processBotMessage(text, req.file.buffer, req.file.originalname, 'simulator');
     } else {
-      response = await processBotMessage(text);
+      response = await processBotMessage(text, undefined, undefined, 'simulator');
     }
 
     res.json({
