@@ -448,6 +448,25 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     };
   }
 
+  // 5.5. Partial Match for: เติม [ชื่อสินค้า] (without quantity specified)
+  const partialReplenishRegex = /^(เติม|add)\s+([ก-๙a-zA-Z0-9\s_]+)$/i;
+  const partRepMatch = cleanText.match(partialReplenishRegex);
+  if (partRepMatch) {
+    const queryName = partRepMatch[2].trim().toLowerCase();
+    const matchedItem = STOCK_ITEMS_LIST.find(item => 
+      item.nameThai === queryName || 
+      item.code.toLowerCase() === queryName ||
+      item.nameThai.includes(queryName)
+    );
+
+    if (matchedItem) {
+      return {
+        type: 'text',
+        text: `✍️ คุณเลือกเติม "${matchedItem.nameThai}" เรียบร้อยค่ะ!\nกรุณาพิมพ์ระบุจำนวนที่ต้องการเติมต่อท้ายได้เลย เช่น:\n\nเติม ${matchedItem.nameThai} 10`
+      };
+    }
+  }
+
   // 6. Pattern Parsing for: คงเหลือ [ชื่อสินค้า] [จำนวน]
   const dailyCountRegex = /^(คงเหลือ|เหลือ|นับได้|count)\s+([ก-๙a-zA-Z0-9\s_]+)\s+(\d+(\.\d+)?)$/i;
   const countMatch = cleanText.match(dailyCountRegex);
@@ -474,6 +493,25 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
       type: 'text',
       text: `✅ บันทึกยอดคงเหลือจริงสำเร็จสำหรับวันที่ ${targetDate}!\nวัตถุดิบ: ${matchedItem.nameThai}\nจำนวนที่นับได้จริง: ${qty} ${matchedItem.unit}\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`
     };
+  }
+
+  // 6.2. Partial Match for: คงเหลือ [ชื่อสินค้า] (without quantity specified)
+  const partialCountRegex = /^(คงเหลือ|เหลือ|นับได้|count)\s+([ก-๙a-zA-Z0-9\s_]+)$/i;
+  const partCountMatch = cleanText.match(partialCountRegex);
+  if (partCountMatch) {
+    const queryName = partCountMatch[2].trim().toLowerCase();
+    const matchedItem = STOCK_ITEMS_LIST.find(item => 
+      item.nameThai === queryName || 
+      item.code.toLowerCase() === queryName ||
+      item.nameThai.includes(queryName)
+    );
+
+    if (matchedItem) {
+      return {
+        type: 'text',
+        text: `✍️ คุณเลือกบันทึกคงเหลือ "${matchedItem.nameThai}" เรียบร้อยค่ะ!\nกรุณาพิมพ์ระบุจำนวนที่นับได้จริงต่อท้ายได้เลย เช่น:\n\nคงเหลือ ${matchedItem.nameThai} 45`
+      };
+    }
   }
 
   // 6.5. Pattern Parsing for: หมายเหตุ [เพิ่ม|ลด] [ชื่อพิซซ่า]
