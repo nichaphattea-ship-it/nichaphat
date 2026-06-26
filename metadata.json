@@ -1,0 +1,6 @@
+{
+  "name": "Restaurant Stock LINE Bot",
+  "description": "LINE bot and dashboard for restaurant stock replenishment, daily count tracking, and sales Excel deduction with MySQL backend.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
