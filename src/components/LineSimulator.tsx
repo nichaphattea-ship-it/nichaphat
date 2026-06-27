@@ -151,7 +151,8 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
 
   const handleRichMenuClick = (menuType: 'replenish' | 'count' | 'note' | 'report') => {
     setQuantities({});
-    setActiveMenuTab(activeMenuTab === menuType ? 'none' : menuType);
+    // Close the web sheet panel so that chat bubbles and bot cards are fully visible in the chat interface
+    setActiveMenuTab('none');
     
     if (menuType === 'report') {
       handleSendMessage(`รายงาน วันที่ ${selectedDate}`);
@@ -519,15 +520,27 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
 
                           {/* Render URI buttons at the bottom of the card, full width */}
                           {msg.flexContent?.items?.filter((item: any) => item.actionType === 'uri').map((item: any) => (
-                            <a
+                            <button
                               key={item.name}
-                              href={item.actionUri}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="mt-3 block w-full text-center px-3 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-xl transition-all shadow-sm"
+                              onClick={() => {
+                                try {
+                                  const url = new URL(item.actionUri);
+                                  const tab = url.searchParams.get('tab') as any;
+                                  if (tab) {
+                                    setActiveMenuTab(tab);
+                                  }
+                                } catch (e) {
+                                  if (item.actionUri?.includes('tab=replenish')) {
+                                    setActiveMenuTab('replenish');
+                                  } else if (item.actionUri?.includes('tab=count')) {
+                                    setActiveMenuTab('count');
+                                  }
+                                }
+                              }}
+                              className="mt-3 block w-full text-center px-3 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-xl transition-all shadow-sm cursor-pointer"
                             >
                               {item.name}
-                            </a>
+                            </button>
                           ))}
                         </div>
                         {/* Submit Button */}
