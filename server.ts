@@ -566,10 +566,8 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     const discrepancy = await getDiscrepancyReport(targetDate);
     const lostItems = discrepancy.filter(d => d.difference !== 0);
     
-    let summaryText = `📈 รายงานความคลาดเคลื่อนสต๊อก (${targetDate})\n`;
-    if (lostItems.length === 0) {
-      summaryText += `\n✅ ยอดสต๊อกคงเหลือจริงตรงกับยอดขายระบบครบถ้วนทุกรายการค่ะ! Perfect!`;
-    } else {
+    let summaryText = `📈 รายงานยอดสต๊อกคงเหลือ (${targetDate})\n`;
+    if (lostItems.length > 0) {
       summaryText += `\n⚠️ พบรายการไม่ตรงกัน ${lostItems.length} วัตถุดิบ:`;
       lostItems.slice(0, 7).forEach(d => {
         const sign = d.difference > 0 ? '❌ ขาดหายไป' : '➕ เกินมา';
