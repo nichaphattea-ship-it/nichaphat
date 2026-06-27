@@ -564,21 +564,11 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
   // 4. Command: "รายงาน" (Send summary report & comparison link)
   if (cleanText === 'รายงาน' || cleanText.startsWith('รายงาน')) {
     const discrepancy = await getDiscrepancyReport(targetDate);
-    const lostItems = discrepancy.filter(d => d.difference !== 0);
     
-    let summaryText = `📈 รายงานยอดสต๊อกคงเหลือ (${targetDate})\n`;
-    if (lostItems.length > 0) {
-      summaryText += `\n⚠️ พบรายการไม่ตรงกัน ${lostItems.length} วัตถุดิบ:`;
-      lostItems.slice(0, 7).forEach(d => {
-        const sign = d.difference > 0 ? '❌ ขาดหายไป' : '➕ เกินมา';
-        summaryText += `\n- ${d.nameThai}: ${sign} ${Math.abs(d.difference)} ${STOCK_ITEMS_MAP[d.itemCode]?.unit} (ควรมี ${d.expectedRemaining} นับได้ ${d.actualRemaining})`;
-      });
-      if (lostItems.length > 7) {
-        summaryText += `\n...และรายการอื่นๆ รวม ${lostItems.length} รายการ`;
-      }
-    }
-
-    summaryText += `\n\n📋 ยอดวัตถุดิบคงเหลือจริง:`;
+    const dateParts = targetDate.split('-');
+    const formattedDate = dateParts.length === 3 ? `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}` : targetDate;
+    
+    let summaryText = `รายงานยอดวัตถุดิบคงเหลือ\nข้อมูลวันที่ ${formattedDate}`;
     discrepancy.forEach(d => {
       summaryText += `\n- ${d.nameThai}: ${d.actualRemaining} ${STOCK_ITEMS_MAP[d.itemCode]?.unit || 'ยูนิต'}`;
     });
