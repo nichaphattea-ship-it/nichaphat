@@ -128,16 +128,37 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
     }
   };
 
+  // Synchronize URL query parameters with bot actions on mount
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    const dateParam = params.get('date');
+    
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      handleSendMessage(`วันที่ ${dateParam}`);
+    }
+    
+    if (tabParam === 'replenish') {
+      setTimeout(() => {
+        handleSendMessage('เติมสต๊อก');
+      }, 500);
+    } else if (tabParam === 'count') {
+      setTimeout(() => {
+        handleSendMessage('คงเหลือ');
+      }, 500);
+    }
+  }, []);
+
   const handleRichMenuClick = (menuType: 'replenish' | 'count' | 'note' | 'report') => {
     setQuantities({});
     if (menuType === 'report') {
-      setActiveMenuTab(activeMenuTab === 'report' ? 'none' : 'report');
+      handleSendMessage(`รายงาน วันที่ ${selectedDate}`);
     } else if (menuType === 'replenish') {
-      setActiveMenuTab(activeMenuTab === 'replenish' ? 'none' : 'replenish');
+      handleSendMessage('เติมสต๊อก');
     } else if (menuType === 'count') {
-      setActiveMenuTab(activeMenuTab === 'count' ? 'none' : 'count');
+      handleSendMessage('คงเหลือ');
     } else if (menuType === 'note') {
-      setActiveMenuTab(activeMenuTab === 'note' ? 'none' : 'note');
+      handleSendMessage('หมายเหตุ');
     }
   };
 
@@ -373,11 +394,7 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
           onChange={(e) => {
             const newDate = e.target.value;
             setSelectedDate(newDate);
-            addMessage({
-              sender: 'bot',
-              type: 'text',
-              text: `📅 เปลี่ยนวันจำลองรายการย้อนหลังเป็นวันที่ ${newDate} เรียบร้อยแล้วค่ะ\nหลังจากนี้ ยอดขาย (Excel) หรือคำสั่งเติมของ/ตรวจนับ จะลงข้อมูลในวันที่นี้โดยอัตโนมัติค่ะ`
-            });
+            handleSendMessage(`วันที่ ${newDate}`);
           }}
           className="text-[11px] font-black text-emerald-400 bg-[#121215] px-2 py-0.5 rounded border border-gray-700 outline-none cursor-pointer focus:ring-1 focus:ring-[#06c755] text-center"
         />
