@@ -405,7 +405,7 @@ function parseBulkStockCommand(text: string): { itemCode: string; qty: number }[
 }
 
 // Helper to handle bot commands dynamically (used by both REAL Webhook and Simulator!)
-async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string, userId: string = 'default', appUrl?: string): Promise<any> {
+export async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string, userId: string = 'default', appUrl?: string): Promise<any> {
   const todayStr = new Date().toISOString().split('T')[0];
   const activeWorkingDate = userWorkingDates.get(userId) || todayStr;
   const fallbackUrl = appUrl || process.env.APP_URL || 'https://ais-dev-jakoczvgg5o2lyhssvcexq-299540791310.asia-east1.run.app';

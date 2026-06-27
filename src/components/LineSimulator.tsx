@@ -99,7 +99,12 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
         throw new Error('Network error sending message');
       }
 
-      const data = await response.json();
+      let data;
+      try {
+        data = await response.json();
+      } catch (jsonErr) {
+        throw new Error('ระบบเซิร์ฟเวอร์กำลังบูตหรือรีสตาร์ทเพื่ออัปเดตข้อมูล กรุณารอประมาณ 3-5 วินาทีแล้วกดส่งอีกครั้งนะคะ 🙏');
+      }
       
       // Artificial delay to mimic typing
       await new Promise<void>((resolve) => {
