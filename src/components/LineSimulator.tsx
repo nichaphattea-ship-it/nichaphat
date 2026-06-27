@@ -151,6 +151,8 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
 
   const handleRichMenuClick = (menuType: 'replenish' | 'count' | 'note' | 'report') => {
     setQuantities({});
+    setActiveMenuTab(activeMenuTab === menuType ? 'none' : menuType);
+    
     if (menuType === 'report') {
       handleSendMessage(`รายงาน วันที่ ${selectedDate}`);
     } else if (menuType === 'replenish') {
