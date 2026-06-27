@@ -370,6 +370,206 @@ export function parseSalesExcel(fileBuffer: Buffer): Record<string, number> {
     salesMap[item.code] = 0;
   });
 
+  // Try to find header column indices to prevent selecting other numeric columns (like physical counts or theory remaining)
+  let nameColIdx = -1;
+  let qtyColIdx = -1;
+  let codeColIdx = -1;
+
+  for (let r = 0; r < Math.min(15, rows.length); r++) {
+    const row = rows[r];
+    if (!row || row.length === 0) continue;
+    
+    const cells = row.map(c => c !== null && c !== undefined ? String(c).trim().toLowerCase() : '');
+    
+    // Look for product/item identifier column and quantity column
+    const hasProductHeader = cells.some(c => 
+      c.includes('สินค้า') || c.includes('วัตถุดิบ') || c.includes('รายการ') || 
+      c === 'item' || c === 'product' || c === 'name' || c.includes('ดิบ')
+    );
+    
+    if (hasProductHeader) {
+      nameColIdx = cells.findIndex(c => 
+        c.includes('สินค้า') || c.includes('วัตถุดิบ') || c.includes('รายการ') || 
+        c === 'item' || c === 'product' || c === 'name' || c.includes('ดิบ')
+      );
+      
+      // Look for sales quantity column specifically (prioritize sales-related names over physical count or diff columns)
+      qtyColIdx = cells.findIndex(c => 
+        c.includes('จำนวนที่ขาย') || c.includes('ยอดขายตามระบบ') || 
+        c.includes('ยอดขาย') || c.includes('จำนวนขาย') || c.includes('ขาย') || 
+        (c.includes('จำนวน') && !c.includes('เหลือ') && !c.includes('นับ') && !c.includes('จริง') && !c.includes('เติม')) || 
+        c === 'qty' || c === 'quantity' || c === 'sold' || c === 'sales'
+      );
+      
+      codeColIdx = cells.findIndex(c => c.includes('รหัส') || c === 'code' || c === 'id');
+      
+      if (qtyColIdx !== -1 && nameColIdx !== -1) {
+        // Headers identified successfully!
+        break;
+      }
+    }
+  }
+
+  // If columns are identified, parse using specific column indices
+  if (nameColIdx !== -1 && qtyColIdx !== -1) {
+    for (let r = 0; r < rows.length; r++) {
+      const row = rows[r];
+      if (!row || row.length === 0) continue;
+
+      const nameVal = row[nameColIdx] !== null && row[nameColIdx] !== undefined ? String(row[nameColIdx]).trim() : '';
+      const qtyVal = row[qtyColIdx];
+      const codeVal = codeColIdx !== -1 && row[codeColIdx] !== null && row[codeColIdx] !== undefined ? String(row[codeColIdx]).trim() : '';
+
+      if (!nameVal) continue;
+      
+      const parsedQty = parseFloat(String(qtyVal).trim());
+      if (isNaN(parsedQty) || parsedQty <= 0) continue;
+
+      // Skip header rows if accidentally parsed in data loop
+      if (
+        nameVal.includes('สินค้า') || nameVal.includes('วัตถุดิบ') || nameVal.includes('รายการ') ||
+        nameVal === 'item' || nameVal === 'product' || nameVal === 'name' ||
+        nameVal.includes('รวม') || nameVal.includes('total') || nameVal.includes('sum')
+      ) {
+        continue;
+      }
+
+      // Identify stock code
+      let matchedCode = '';
+      if (codeVal && STOCK_ITEMS_MAP[codeVal.toLowerCase()]) {
+        matchedCode = codeVal.toLowerCase();
+      } else if (STOCK_ITEMS_MAP[nameVal.toLowerCase()]) {
+        matchedCode = nameVal.toLowerCase();
+      }
+
+      if (!matchedCode) {
+        // Direct Thai name match
+        const cleanName = nameVal.toLowerCase();
+        const matched = STOCK_ITEMS_LIST.find(item => 
+          item.nameThai.trim().toLowerCase() === cleanName ||
+          (item.code === 'french_fries' && (cleanName.includes('เฟรนฟราย') || cleanName.includes('เฟรนช์ฟราย'))) ||
+          (item.code === 'banana_samosa' && cleanName.includes('ซาโมซ่า')) ||
+          (item.code === 'beef_salami' && cleanName.includes('ซาลามี่')) ||
+          (item.code === 'beef_steak' && cleanName.includes('สเต็กเนื้อ')) ||
+          (item.code === 'pork_chop' && (cleanName.includes('พ็อกชอป') || cleanName.includes('พอร์คชอป') || cleanName.includes('พอร์คช็อป'))) ||
+          (item.code === 'seafood_set' && (cleanName === 'ทะเล' || cleanName === 'ชุดทะเล'))
+        );
+        if (matched) {
+          matchedCode = matched.code;
+        }
+      }
+
+      if (matchedCode) {
+        salesMap[matchedCode] += parsedQty;
+        continue;
+      }
+
+      // Apply recipe mappings based on dish name
+      const matchedNameLower = nameVal.toLowerCase();
+
+      // Check if it's a known recipe dish
+      const isKnownDish = 
+        matchedNameLower.includes('พิซซ่า') || 
+        matchedNameLower.includes('pizza') ||
+        matchedNameLower.includes('สปาเก็ตตี้') ||
+        matchedNameLower.includes('spaghetti') ||
+        matchedNameLower.includes('เฟรนช์ฟราย') ||
+        matchedNameLower.includes('เฟรนฟราย') ||
+        matchedNameLower.includes('fries') ||
+        matchedNameLower.includes('พ็อกชอป') ||
+        matchedNameLower.includes('chop') ||
+        matchedNameLower.includes('สเต็กเนื้อ') ||
+        matchedNameLower.includes('steak') ||
+        matchedNameLower.includes('ซาโมซ่า') ||
+        matchedNameLower.includes('samosa') ||
+        matchedNameLower.includes('เบคอน') ||
+        matchedNameLower.includes('bacon') ||
+        matchedNameLower.includes('แฮม') ||
+        matchedNameLower.includes('ham') ||
+        matchedNameLower.includes('ซาลามี่') ||
+        matchedNameLower.includes('salami') ||
+        matchedNameLower.includes('แซลมอน') ||
+        matchedNameLower.includes('salmon') ||
+        matchedNameLower.includes('เห็ด') ||
+        matchedNameLower.includes('mushroom') ||
+        matchedNameLower.includes('กุ้ง') ||
+        matchedNameLower.includes('หมึก') ||
+        matchedNameLower.includes('หอย') ||
+        matchedNameLower.includes('ทะเล') ||
+        matchedNameLower.includes('seafood');
+
+      if (!isKnownDish) continue;
+
+      // Apply recipes
+      const isPizza = matchedNameLower.includes('พิซซ่า') || matchedNameLower.includes('pizza');
+      const isDouble = matchedNameLower.includes('ดับเบิ้ล') || matchedNameLower.includes('double');
+
+      if (isPizza) {
+        const cheeseCut = isDouble ? 1.5 : 1.0;
+        salesMap['cheese'] += (cheeseCut * parsedQty);
+      }
+
+      const isSeafoodPizza = isPizza && (matchedNameLower.includes('ซีฟู้ด') || matchedNameLower.includes('ซีฟู๊ด') || matchedNameLower.includes('seafood'));
+      const isSpaghettiBlack = matchedNameLower.includes('หมึกดำ') || matchedNameLower.includes('spaghetti black') || (matchedNameLower.includes('พริกกระเทียม') && matchedNameLower.includes('สปาเก็ตตี้'));
+      
+      if (isSeafoodPizza || isSpaghettiBlack) {
+        salesMap['seafood_set'] += (1.0 * parsedQty);
+      }
+
+      const isSalmonPizza = isPizza && (matchedNameLower.includes('แซลมอน') || matchedNameLower.includes('salmon'));
+      if (isSalmonPizza) {
+        salesMap['salmon'] += (1.0 * parsedQty);
+      }
+
+      if (matchedNameLower.includes('ซาลามี่') || matchedNameLower.includes('salami')) {
+        salesMap['beef_salami'] += parsedQty;
+      }
+      if (matchedNameLower.includes('พามาแฮม') || matchedNameLower.includes('pama ham') || matchedNameLower.includes('parma')) {
+        salesMap['parma_ham'] += parsedQty;
+      }
+      if (matchedNameLower.includes('เห็ดแชมปิญอง') || matchedNameLower.includes('truffle') || matchedNameLower.includes('ทรัฟเฟิล') || matchedNameLower.includes('champignon')) {
+        salesMap['champignon_mushroom'] += parsedQty;
+      }
+      if (matchedNameLower.includes('แฮม') || matchedNameLower.includes('ham')) {
+        if (!matchedNameLower.includes('พามา') && !matchedNameLower.includes('pama') && !matchedNameLower.includes('parma')) {
+          salesMap['ham'] += parsedQty;
+        }
+      }
+      if (matchedNameLower.includes('เบคอน') || matchedNameLower.includes('bacon')) {
+        salesMap['bacon'] += parsedQty;
+      }
+      if (matchedNameLower.includes('เฟรนช์ฟราย') || matchedNameLower.includes('เฟรนฟราย') || matchedNameLower.includes('french fries') || matchedNameLower.includes('fries')) {
+        salesMap['french_fries'] += parsedQty;
+      }
+      if (matchedNameLower.includes('พ็อกชอป') || matchedNameLower.includes('pork chop') || matchedNameLower.includes('porkchop')) {
+        salesMap['pork_chop'] += parsedQty;
+      }
+      if (matchedNameLower.includes('สเต็กเนื้อ') || matchedNameLower.includes('tenderloin') || matchedNameLower.includes('steak')) {
+        salesMap['beef_steak'] += parsedQty;
+      }
+      if (matchedNameLower.includes('ซาโมซ่า') || matchedNameLower.includes('samosa')) {
+        salesMap['banana_samosa'] += parsedQty;
+      }
+      if (matchedNameLower.includes('ทูน่า') || matchedNameLower.includes('tuna')) {
+        salesMap['tuna'] += parsedQty;
+      }
+      if (matchedNameLower.includes('หมูบด') || matchedNameLower.includes('minced pork')) {
+        salesMap['minced_pork'] += parsedQty;
+      }
+      if (matchedNameLower.includes('กุ้ง') || matchedNameLower.includes('shrimp') || matchedNameLower.includes('prawn')) {
+        salesMap['shrimp'] += parsedQty;
+      }
+      if (matchedNameLower.includes('หมึก') || matchedNameLower.includes('squid') || matchedNameLower.includes('octopus')) {
+        salesMap['squid'] += parsedQty;
+      }
+      if (matchedNameLower.includes('หอย') || matchedNameLower.includes('clam') || matchedNameLower.includes('mussel')) {
+        salesMap['clam'] += parsedQty;
+      }
+    }
+    return salesMap;
+  }
+
+  // Fallback to older row-scanning logic if no clear columns are found
   for (const row of rows) {
     if (!row || row.length === 0) continue;
 

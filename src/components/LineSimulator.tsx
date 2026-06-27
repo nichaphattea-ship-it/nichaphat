@@ -209,6 +209,31 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
         </div>
       </div>
 
+      {/* Simulation Date Selector Bar */}
+      <div className="bg-gray-800/80 border border-gray-700/60 rounded-xl p-2 mb-2 flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-1.5">
+          <span className="flex h-1.5 w-1.5 relative">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+          </span>
+          <span className="text-[10px] font-bold text-gray-300 font-sans">เลือกวันจำลองข้อมูลย้อนหลัง:</span>
+        </div>
+        <input
+          type="date"
+          value={selectedDate}
+          onChange={(e) => {
+            const newDate = e.target.value;
+            setSelectedDate(newDate);
+            addMessage({
+              sender: 'bot',
+              type: 'text',
+              text: `📅 เปลี่ยนวันจำลองรายการย้อนหลังเป็นวันที่ ${newDate} เรียบร้อยแล้วค่ะ\nหลังจากนี้ ยอดขาย (Excel) หรือคำสั่งเติมของ/ตรวจนับ จะลงข้อมูลในวันที่นี้โดยอัตโนมัติค่ะ`
+            });
+          }}
+          className="text-[11px] font-black text-emerald-400 bg-[#121215] px-2 py-0.5 rounded border border-gray-700 outline-none cursor-pointer focus:ring-1 focus:ring-[#06c755] text-center"
+        />
+      </div>
+
 
 
       {/* Chat Messages Display */}
