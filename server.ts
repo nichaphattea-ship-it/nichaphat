@@ -568,7 +568,15 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     const dateParts = targetDate.split('-');
     const formattedDate = dateParts.length === 3 ? `${dateParts[2]}-${dateParts[1]}-${dateParts[0]}` : targetDate;
     
-    let summaryText = `รายงานยอดวัตถุดิบคงเหลือ\nข้อมูลวันที่ ${formattedDate}`;
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('th-TH', {
+      timeZone: 'Asia/Bangkok',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    });
+    
+    let summaryText = `รายงานยอดวัตถุดิบคงเหลือ\nข้อมูลวันที่ ${formattedDate} เวลา ${timeStr} น.`;
     discrepancy.forEach(d => {
       summaryText += `\n- ${d.nameThai}: ${d.actualRemaining} ${STOCK_ITEMS_MAP[d.itemCode]?.unit || 'ยูนิต'}`;
     });
