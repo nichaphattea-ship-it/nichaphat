@@ -28,6 +28,8 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [quantities, setQuantities] = useState<Record<string, string>>({});
+  const [flexQuantities, setFlexQuantities] = useState<Record<string, Record<string, string>>>({});
+  const [submittedMessages, setSubmittedMessages] = useState<string[]>([]);
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -184,6 +186,67 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
     for (const item of activeItems) {
       const qty = parseFloat(quantitiesCopy[item.code] || '0');
       const commandText = mode === 'replenish'
+        ? `เติม ${item.nameThai} ${qty} วันที่ ${selectedDate}`
+        : `คงเหลือ ${item.nameThai} ${qty} วันที่ ${selectedDate}`;
+      
+      await handleSendMessage(commandText);
+    }
+  };
+
+  const getFlexQty = (msgId: string, itemCode: string) => {
+    return flexQuantities[msgId]?.[itemCode] ?? "0";
+  };
+
+  const setFlexQty = (msgId: string, itemCode: string, value: string) => {
+    setFlexQuantities(prev => ({
+      ...prev,
+      [msgId]: {
+        ...(prev[msgId] || {}),
+        [itemCode]: value
+      }
+    }));
+  };
+
+  const handleFlexIncrement = (msgId: string, itemCode: string) => {
+    const currentStr = getFlexQty(msgId, itemCode);
+    let currentVal = parseFloat(currentStr);
+    if (isNaN(currentVal)) currentVal = 0;
+    setFlexQty(msgId, itemCode, String(currentVal + 1));
+  };
+
+  const handleFlexDecrement = (msgId: string, itemCode: string) => {
+    const currentStr = getFlexQty(msgId, itemCode);
+    let currentVal = parseFloat(currentStr);
+    if (isNaN(currentVal)) currentVal = 0;
+    const newVal = Math.max(0, currentVal - 1);
+    setFlexQty(msgId, itemCode, String(newVal));
+  };
+
+  const handleFlexBulkSubmit = async (msgId: string, isReplenish: boolean) => {
+    const qMap = flexQuantities[msgId] || {};
+    const activeItems = STOCK_ITEMS_LIST.filter(item => {
+      const val = qMap[item.code];
+      if (val === undefined || val === '') return false;
+      const num = parseFloat(val);
+      if (isNaN(num)) return false;
+      if (isReplenish) {
+        return num > 0;
+      } else {
+        return num >= 0;
+      }
+    });
+
+    if (activeItems.length === 0) {
+      alert('กรุณากรอกจำนวนอย่างน้อย 1 รายการ');
+      return;
+    }
+
+    setSubmittedMessages(prev => [...prev, msgId]);
+
+    // Send commands sequentially
+    for (const item of activeItems) {
+      const qty = parseFloat(qMap[item.code] || '0');
+      const commandText = isReplenish
         ? `เติม ${item.nameThai} ${qty} วันที่ ${selectedDate}`
         : `คงเหลือ ${item.nameThai} ${qty} วันที่ ${selectedDate}`;
       
@@ -362,47 +425,135 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
                 )}
 
                 {/* Flex Message Simulation */}
-                {msg.type === 'flex' && (
-                  <div className="bg-white rounded-2xl text-gray-800 overflow-hidden shadow-lg border border-gray-100 rounded-tl-xs">
-                    <div className="bg-[#1f2937] text-emerald-400 p-2.5 text-xs font-bold flex items-center gap-1.5">
-                      <Bot className="w-4 h-4" />
-                      {msg.flexContent?.title}
-                    </div>
-                    <div className="p-3 text-[11px] text-gray-600 whitespace-pre-line border-b border-gray-100">
-                      {msg.flexContent?.description}
-                    </div>
-                    <div className="max-h-48 overflow-y-auto p-1 bg-gray-50/50 scrollbar-thin">
-                      {msg.flexContent?.items?.map((item: any) => (
-                        <button
-                          key={item.code || item.name}
-                          onClick={() => {
-                            if (msg.id === messages[messages.length - 1].id) {
-                              if (item.actionText && (msg.flexContent?.title?.includes('หมายเหตุ') || !item.unit)) {
-                                handleSendMessage(item.actionText);
-                              } else {
-                                handleItemSelectInMenu(item);
+                {msg.type === 'flex' && (() => {
+                  const isReplenish = msg.flexContent?.title?.includes('เติมสต๊อก');
+                  const isCount = msg.flexContent?.title?.includes('คงเหลือ');
+                  const isInteractive = isReplenish || isCount;
+                  
+                  if (isInteractive) {
+                    const isSubmitted = submittedMessages.includes(msg.id);
+                    return (
+                      <div className="bg-white rounded-2xl text-gray-800 overflow-hidden shadow-lg border border-gray-100 rounded-tl-xs flex flex-col w-[300px] max-w-full">
+                        {/* Header banner */}
+                        <div className={`p-2.5 text-xs font-bold flex items-center justify-center text-white shrink-0 ${
+                          isReplenish ? 'bg-[#06c755]' : 'bg-rose-600'
+                        }`}>
+                          {msg.flexContent?.title}
+                        </div>
+                        {/* Description */}
+                        <div className="p-3 text-[11px] text-gray-600 whitespace-pre-line border-b border-gray-100">
+                          {msg.flexContent?.description}
+                        </div>
+                        {/* List of items */}
+                        <div className="max-h-72 overflow-y-auto p-2 space-y-2 scrollbar-thin">
+                          {msg.flexContent?.items?.map((item: any) => {
+                            const itemCode = item.code || item.name;
+                            const currentVal = getFlexQty(msg.id, itemCode);
+                            return (
+                              <div key={itemCode} className="flex items-center justify-between py-1 border-b border-gray-50 last:border-none">
+                                <span className="text-xs font-bold text-gray-800">{item.name}</span>
+                                <div className="flex items-center gap-1.5">
+                                  <button
+                                    type="button"
+                                    disabled={isSubmitted}
+                                    onClick={() => handleFlexDecrement(msg.id, itemCode)}
+                                    className="w-6 h-6 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90 disabled:opacity-50"
+                                  >
+                                    -
+                                  </button>
+                                  <input
+                                    type="text"
+                                    disabled={isSubmitted}
+                                    value={currentVal}
+                                    onChange={(e) => setFlexQty(msg.id, itemCode, e.target.value)}
+                                    className="w-10 h-6 bg-gray-50 border border-gray-200 rounded text-center font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+                                  />
+                                  <button
+                                    type="button"
+                                    disabled={isSubmitted}
+                                    onClick={() => handleFlexIncrement(msg.id, itemCode)}
+                                    className="w-6 h-6 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90 disabled:opacity-50"
+                                  >
+                                    +
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                        {/* Submit Button */}
+                        <div className="p-2 border-t border-gray-100 bg-gray-50">
+                          <button
+                            disabled={isSubmitted}
+                            onClick={() => handleFlexBulkSubmit(msg.id, isReplenish)}
+                            className={`w-full font-bold text-xs py-2 rounded-xl transition-all shadow-sm active:scale-[0.98] flex items-center justify-center gap-1.5 cursor-pointer text-white ${
+                              isSubmitted
+                                ? 'bg-gray-400 cursor-not-allowed'
+                                : isReplenish 
+                                ? 'bg-[#06c755] hover:bg-green-600' 
+                                : 'bg-rose-600 hover:bg-rose-700'
+                            }`}
+                          >
+                            {isSubmitted ? (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                ส่งข้อมูลเรียบร้อยแล้ว
+                              </>
+                            ) : (
+                              <>
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                ส่งข้อมูล{isReplenish ? 'เติมสต๊อก' : 'ยอดคงเหลือจริง'}
+                              </>
+                            )}
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  }
+
+                  // Default rendering for other Flex Messages
+                  return (
+                    <div className="bg-white rounded-2xl text-gray-800 overflow-hidden shadow-lg border border-gray-100 rounded-tl-xs">
+                      <div className="bg-[#1f2937] text-emerald-400 p-2.5 text-xs font-bold flex items-center gap-1.5">
+                        <Bot className="w-4 h-4" />
+                        {msg.flexContent?.title}
+                      </div>
+                      <div className="p-3 text-[11px] text-gray-600 whitespace-pre-line border-b border-gray-100">
+                        {msg.flexContent?.description}
+                      </div>
+                      <div className="max-h-48 overflow-y-auto p-1 bg-gray-50/50 scrollbar-thin">
+                        {msg.flexContent?.items?.map((item: any) => (
+                          <button
+                            key={item.code || item.name}
+                            onClick={() => {
+                              if (msg.id === messages[messages.length - 1].id) {
+                                if (item.actionText && (msg.flexContent?.title?.includes('หมายเหตุ') || !item.unit)) {
+                                  handleSendMessage(item.actionText);
+                                } else {
+                                  handleItemSelectInMenu(item);
+                                }
                               }
-                            }
-                          }}
-                          className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-emerald-50 rounded-lg flex items-center justify-between border-b border-gray-100/50 transition-colors"
-                        >
-                          <span className="font-medium text-gray-700">{item.name}</span>
-                          {item.unit ? (
-                            <span className="text-[10px] text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded font-mono flex items-center gap-1">
-                              {item.unit}
-                              <ChevronRight className="w-2.5 h-2.5 text-gray-400" />
-                            </span>
-                          ) : (
-                            <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
-                              กดด่วน
-                              <ChevronRight className="w-2.5 h-2.5 text-emerald-500" />
-                            </span>
-                          )}
-                        </button>
-                      ))}
+                            }}
+                            className="w-full text-left px-2.5 py-1.5 text-xs hover:bg-emerald-50 rounded-lg flex items-center justify-between border-b border-gray-100/50 transition-colors"
+                          >
+                            <span className="font-medium text-gray-700">{item.name}</span>
+                            {item.unit ? (
+                              <span className="text-[10px] text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded font-mono flex items-center gap-1">
+                                {item.unit}
+                                <ChevronRight className="w-2.5 h-2.5 text-gray-400" />
+                              </span>
+                            ) : (
+                              <span className="text-[10px] text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded font-bold flex items-center gap-1">
+                                กดด่วน
+                                <ChevronRight className="w-2.5 h-2.5 text-emerald-500" />
+                              </span>
+                            )}
+                          </button>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 <span className="text-[9px] text-gray-100 mt-1 select-none font-mono text-right pr-1">
                   {msg.timestamp}
