@@ -900,10 +900,20 @@ function buildLineMessage(result: any): any {
     const items = flexContent.items || [];
     
     const buildAction = (item: any) => {
+      if (!item) {
+        return {
+          type: "message",
+          label: "Unknown",
+          text: "Unknown"
+        };
+      }
+      const labelText = item.name || "";
+      const truncatedLabel = labelText.length > 40 ? labelText.substring(0, 37) + "..." : labelText;
+
       if (item.actionType === 'datetimepicker') {
         return {
           type: "datetimepicker",
-          label: item.name,
+          label: truncatedLabel || "Date",
           data: item.actionData || "action=set_working_date",
           mode: "date"
         };
@@ -911,14 +921,14 @@ function buildLineMessage(result: any): any {
       if (item.actionType === 'uri') {
         return {
           type: "uri",
-          label: item.name.length > 40 ? item.name.substring(0, 37) + "..." : item.name,
-          uri: item.actionUri
+          label: truncatedLabel || "Web Link",
+          uri: item.actionUri || ""
         };
       }
       return {
         type: "message",
-        label: item.name.length > 40 ? item.name.substring(0, 37) + "..." : item.name,
-        text: item.actionText
+        label: truncatedLabel || "Button",
+        text: item.actionText || ""
       };
     };
 
