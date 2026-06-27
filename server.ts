@@ -576,7 +576,7 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
       hour12: false
     });
     
-    let summaryText = `รายงานยอดวัตถุดิบคงเหลือ\n📆 ${formattedDate} 🕑 ${timeStr} น.`;
+    let summaryText = `📆 ${formattedDate} 🕑 ${timeStr} น.\n📊รายงานยอดวัตถุดิบคงเหลือ\n`;
     discrepancy.forEach(d => {
       summaryText += `\n- ${d.nameThai}: ${d.actualRemaining} ${STOCK_ITEMS_MAP[d.itemCode]?.unit || 'ยูนิต'}`;
     });
