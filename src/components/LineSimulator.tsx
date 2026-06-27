@@ -27,6 +27,7 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [quantities, setQuantities] = useState<Record<string, string>>({});
 
   // Auto scroll to bottom
   useEffect(() => {
@@ -85,18 +86,21 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
       const data = await response.json();
       
       // Artificial delay to mimic typing
-      setTimeout(() => {
-        setIsTyping(false);
-        addMessage({
-          sender: 'bot',
-          type: data.reply.type || 'text',
-          text: data.reply.text,
-          flexContent: data.reply.flexContent
-        });
-        
-        // Trigger dashboard data refresh
-        onDatabaseUpdate();
-      }, 700);
+      await new Promise<void>((resolve) => {
+        setTimeout(() => {
+          setIsTyping(false);
+          addMessage({
+            sender: 'bot',
+            type: data.reply.type || 'text',
+            text: data.reply.text,
+            flexContent: data.reply.flexContent
+          });
+          
+          // Trigger dashboard data refresh
+          onDatabaseUpdate();
+          resolve();
+        }, 700);
+      });
 
     } catch (err: any) {
       setIsTyping(false);
@@ -109,6 +113,7 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
   };
 
   const handleRichMenuClick = (menuType: 'replenish' | 'count' | 'note' | 'report') => {
+    setQuantities({});
     if (menuType === 'report') {
       setActiveMenuTab(activeMenuTab === 'report' ? 'none' : 'report');
     } else if (menuType === 'replenish') {
@@ -117,6 +122,72 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
       setActiveMenuTab(activeMenuTab === 'count' ? 'none' : 'count');
     } else if (menuType === 'note') {
       setActiveMenuTab(activeMenuTab === 'note' ? 'none' : 'note');
+    }
+  };
+
+  const handleQtyInputChange = (itemCode: string, value: string) => {
+    setQuantities(prev => ({
+      ...prev,
+      [itemCode]: value
+    }));
+  };
+
+  const handleIncrement = (itemCode: string) => {
+    setQuantities(prev => {
+      const currentStr = prev[itemCode] ?? "0";
+      let currentVal = parseFloat(currentStr);
+      if (isNaN(currentVal)) currentVal = 0;
+      return {
+        ...prev,
+        [itemCode]: String(currentVal + 1)
+      };
+    });
+  };
+
+  const handleDecrement = (itemCode: string) => {
+    setQuantities(prev => {
+      const currentStr = prev[itemCode] ?? "0";
+      let currentVal = parseFloat(currentStr);
+      if (isNaN(currentVal)) currentVal = 0;
+      const newVal = Math.max(0, currentVal - 1);
+      return {
+        ...prev,
+        [itemCode]: String(newVal)
+      };
+    });
+  };
+
+  const handleBulkSubmit = async () => {
+    const activeItems = STOCK_ITEMS_LIST.filter(item => {
+      const val = quantities[item.code];
+      if (val === undefined || val === '') return false;
+      const num = parseFloat(val);
+      if (isNaN(num)) return false;
+      if (activeMenuTab === 'replenish') {
+        return num > 0;
+      } else {
+        return num >= 0;
+      }
+    });
+
+    if (activeItems.length === 0) {
+      alert('กรุณากรอกจำนวนอย่างน้อย 1 รายการ');
+      return;
+    }
+
+    const mode = activeMenuTab;
+    const quantitiesCopy = { ...quantities };
+    setActiveMenuTab('none');
+    setQuantities({});
+
+    // Send commands sequentially
+    for (const item of activeItems) {
+      const qty = parseFloat(quantitiesCopy[item.code] || '0');
+      const commandText = mode === 'replenish'
+        ? `เติม ${item.nameThai} ${qty} วันที่ ${selectedDate}`
+        : `คงเหลือ ${item.nameThai} ${qty} วันที่ ${selectedDate}`;
+      
+      await handleSendMessage(commandText);
     }
   };
 
@@ -364,11 +435,11 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
             initial={{ y: 150, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 150, opacity: 0 }}
-            className={`absolute bottom-[110px] left-4 right-4 bg-white text-gray-800 rounded-2xl p-3 shadow-2xl z-30 border ${
+            className={`absolute bottom-[110px] left-4 right-4 bg-white text-gray-800 rounded-2xl p-3 shadow-2xl z-30 border max-h-[440px] flex flex-col ${
               activeMenuTab === 'replenish' ? 'border-green-100' : activeMenuTab === 'count' ? 'border-red-100' : activeMenuTab === 'note' ? 'border-amber-100' : 'border-blue-100'
             }`}
           >
-            <div className="flex justify-between items-center mb-2.5 border-b pb-1.5">
+            <div className="flex justify-between items-center mb-2.5 border-b pb-1.5 shrink-0">
               <div className="flex flex-col">
                 <span className="font-bold text-xs flex items-center gap-1.5 text-emerald-700">
                   <span className={`w-2.5 h-2.5 rounded-full ${
@@ -451,6 +522,52 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
                     บันทึก
                   </button>
                 </div>
+              </div>
+            ) : (activeMenuTab === 'replenish' || activeMenuTab === 'count') ? (
+              <div className="space-y-3 flex flex-col flex-1 overflow-hidden">
+                <div className="flex-1 overflow-y-auto pr-1 space-y-2 py-1 scrollbar-thin max-h-[220px]">
+                  {STOCK_ITEMS_LIST.map((item) => {
+                    const currentVal = quantities[item.code] ?? "0";
+                    return (
+                      <div key={item.code} className="flex items-center justify-between py-1 border-b border-gray-100 last:border-none">
+                        <div className="flex flex-col">
+                          <span className="text-xs font-bold text-gray-800">{item.nameThai}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => handleDecrement(item.code)}
+                            className="w-7 h-7 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90"
+                          >
+                            -
+                          </button>
+                          <input
+                            type="text"
+                            value={currentVal}
+                            onChange={(e) => handleQtyInputChange(item.code, e.target.value)}
+                            className="w-12 h-7 bg-gray-50 border border-gray-200 rounded-lg text-center font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleIncrement(item.code)}
+                            className="w-7 h-7 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90"
+                          >
+                            +
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={handleBulkSubmit}
+                  className={`w-full text-white font-bold text-xs py-2 rounded-xl transition-all shadow-md active:scale-[0.98] flex items-center justify-center gap-1.5 cursor-pointer ${
+                    activeMenuTab === 'replenish' ? 'bg-[#06c755] hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'
+                  }`}
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  ส่งข้อมูล{activeMenuTab === 'replenish' ? 'เติมสต๊อก' : 'ยอดคงเหลือจริง'}
+                </button>
               </div>
             ) : selectedItem ? (
               <div className="space-y-3">
