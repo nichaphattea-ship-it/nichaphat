@@ -257,15 +257,16 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
 
     setSubmittedMessages(prev => [...prev, msgId]);
 
-    // Send commands sequentially
-    for (const item of activeItems) {
+    // Build a single bulk command string!
+    // Example: "เติม ชีส 10 แซลมอน 5 วันที่ 2026-06-27"
+    const prefix = isReplenish ? 'เติม' : 'คงเหลือ';
+    const itemsStr = activeItems.map(item => {
       const qty = parseFloat(qMap[item.code] || '0');
-      const commandText = isReplenish
-        ? `เติม ${item.nameThai} ${qty} วันที่ ${selectedDate}`
-        : `คงเหลือ ${item.nameThai} ${qty} วันที่ ${selectedDate}`;
-      
-      await handleSendMessage(commandText);
-    }
+      return `${item.nameThai} ${qty}`;
+    }).join(' ');
+
+    const commandText = `${prefix} ${itemsStr} วันที่ ${selectedDate}`;
+    await handleSendMessage(commandText);
   };
 
   const handleItemSelectInMenu = (item: any) => {
@@ -458,42 +459,57 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
                         <div className="p-3 text-[11px] text-gray-600 whitespace-pre-line border-b border-gray-100">
                           {msg.flexContent?.description}
                         </div>
-                        {/* List of items */}
-                        <div className="max-h-72 overflow-y-auto p-2 space-y-2 scrollbar-thin">
-                          {msg.flexContent?.items?.map((item: any) => {
-                            const itemCode = item.code || item.name;
-                            const currentVal = getFlexQty(msg.id, itemCode);
-                            return (
-                              <div key={itemCode} className="flex items-center justify-between py-1 border-b border-gray-50 last:border-none">
-                                <span className="text-xs font-bold text-gray-800">{item.name}</span>
-                                <div className="flex items-center gap-1.5">
-                                  <button
-                                    type="button"
-                                    disabled={isSubmitted}
-                                    onClick={() => handleFlexDecrement(msg.id, itemCode)}
-                                    className="w-6 h-6 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90 disabled:opacity-50"
-                                  >
-                                    -
-                                  </button>
-                                  <input
-                                    type="text"
-                                    disabled={isSubmitted}
-                                    value={currentVal}
-                                    onChange={(e) => setFlexQty(msg.id, itemCode, e.target.value)}
-                                    className="w-10 h-6 bg-gray-50 border border-gray-200 rounded text-center font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
-                                  />
-                                  <button
-                                    type="button"
-                                    disabled={isSubmitted}
-                                    onClick={() => handleFlexIncrement(msg.id, itemCode)}
-                                    className="w-6 h-6 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90 disabled:opacity-50"
-                                  >
-                                    +
-                                  </button>
+                        {/* List of items in a 2-column grid */}
+                        <div className="max-h-72 overflow-y-auto p-2 scrollbar-thin">
+                          <div className="grid grid-cols-2 gap-2">
+                            {msg.flexContent?.items?.filter((item: any) => item.actionType !== 'uri').map((item: any) => {
+                              const itemCode = item.code || item.name;
+                              const currentVal = getFlexQty(msg.id, itemCode);
+                              return (
+                                <div key={itemCode} className="flex flex-col p-1.5 bg-gray-50 border border-gray-100 rounded-xl space-y-1">
+                                  <span className="text-[10px] font-bold text-gray-700 truncate">{item.name}</span>
+                                  <div className="flex items-center justify-between gap-1">
+                                    <button
+                                      type="button"
+                                      disabled={isSubmitted}
+                                      onClick={() => handleFlexDecrement(msg.id, itemCode)}
+                                      className="w-5 h-5 bg-white hover:bg-gray-100 text-gray-700 font-bold rounded flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90 disabled:opacity-50 text-xs"
+                                    >
+                                      -
+                                    </button>
+                                    <input
+                                      type="text"
+                                      disabled={isSubmitted}
+                                      value={currentVal}
+                                      onChange={(e) => setFlexQty(msg.id, itemCode, e.target.value)}
+                                      className="w-8 h-5 bg-white border border-gray-200 rounded text-center font-bold text-[10px] outline-none focus:ring-1 focus:ring-emerald-500 disabled:opacity-50"
+                                    />
+                                    <button
+                                      type="button"
+                                      disabled={isSubmitted}
+                                      onClick={() => handleFlexIncrement(msg.id, itemCode)}
+                                      className="w-5 h-5 bg-white hover:bg-gray-100 text-gray-700 font-bold rounded flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90 disabled:opacity-50 text-xs"
+                                    >
+                                      +
+                                    </button>
+                                  </div>
                                 </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
+
+                          {/* Render URI buttons at the bottom of the card, full width */}
+                          {msg.flexContent?.items?.filter((item: any) => item.actionType === 'uri').map((item: any) => (
+                            <a
+                              key={item.name}
+                              href={item.actionUri}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="mt-3 block w-full text-center px-3 py-2 bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white font-bold text-xs rounded-xl transition-all shadow-sm"
+                            >
+                              {item.name}
+                            </a>
+                          ))}
                         </div>
                         {/* Submit Button */}
                         <div className="p-2 border-t border-gray-100 bg-gray-50">
@@ -687,52 +703,6 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
                     บันทึก
                   </button>
                 </div>
-              </div>
-            ) : (activeMenuTab === 'replenish' || activeMenuTab === 'count') ? (
-              <div className="space-y-3 flex flex-col flex-1 overflow-hidden">
-                <div className="flex-1 overflow-y-auto pr-1 space-y-2 py-1 scrollbar-thin max-h-[220px]">
-                  {STOCK_ITEMS_LIST.map((item) => {
-                    const currentVal = quantities[item.code] ?? "0";
-                    return (
-                      <div key={item.code} className="flex items-center justify-between py-1 border-b border-gray-100 last:border-none">
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-gray-800">{item.nameThai}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            onClick={() => handleDecrement(item.code)}
-                            className="w-7 h-7 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90"
-                          >
-                            -
-                          </button>
-                          <input
-                            type="text"
-                            value={currentVal}
-                            onChange={(e) => handleQtyInputChange(item.code, e.target.value)}
-                            className="w-12 h-7 bg-gray-50 border border-gray-200 rounded-lg text-center font-bold text-xs outline-none focus:ring-1 focus:ring-emerald-500"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleIncrement(item.code)}
-                            className="w-7 h-7 bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold rounded-lg flex items-center justify-center border border-gray-200 select-none cursor-pointer transition-all active:scale-90"
-                          >
-                            +
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-                <button
-                  onClick={handleBulkSubmit}
-                  className={`w-full text-white font-bold text-xs py-2 rounded-xl transition-all shadow-md active:scale-[0.98] flex items-center justify-center gap-1.5 cursor-pointer ${
-                    activeMenuTab === 'replenish' ? 'bg-[#06c755] hover:bg-green-600' : 'bg-red-500 hover:bg-red-600'
-                  }`}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  ส่งข้อมูล{activeMenuTab === 'replenish' ? 'เติมสต๊อก' : 'ยอดคงเหลือจริง'}
-                </button>
               </div>
             ) : selectedItem ? (
               <div className="space-y-3">
