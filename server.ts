@@ -908,9 +908,16 @@ function buildLineMessage(result: any): any {
           mode: "date"
         };
       }
+      if (item.actionType === 'uri') {
+        return {
+          type: "uri",
+          label: item.name.length > 40 ? item.name.substring(0, 37) + "..." : item.name,
+          uri: item.actionUri
+        };
+      }
       return {
         type: "message",
-        label: item.name,
+        label: item.name.length > 40 ? item.name.substring(0, 37) + "..." : item.name,
         text: item.actionText
       };
     };
