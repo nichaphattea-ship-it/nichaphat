@@ -325,11 +325,54 @@ interface UserState {
 }
 
 const userStates = new Map<string, UserState>();
+const userWorkingDates = new Map<string, string>(); // User persistent working dates (userId -> YYYY-MM-DD)
+
+function getThaiDateLabel(daysAgo: number): { label: string; dateStr: string } {
+  const date = new Date();
+  date.setDate(date.getDate() - daysAgo);
+  const dateStr = date.toISOString().split('T')[0];
+  const thaiMonths = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'];
+  const day = date.getDate();
+  const month = thaiMonths[date.getMonth()];
+  
+  let label = '';
+  if (daysAgo === 0) {
+    label = `วันนี้ (${day} ${month})`;
+  } else if (daysAgo === 1) {
+    label = `เมื่อวาน (${day} ${month})`;
+  } else {
+    label = `${day} ${month}`;
+  }
+  return { label, dateStr };
+}
 
 // Helper to handle bot commands dynamically (used by both REAL Webhook and Simulator!)
 async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string, userId: string = 'default'): Promise<any> {
   const todayStr = new Date().toISOString().split('T')[0];
-  const { date: targetDate, cleanText: extractedCleanText } = extractDateFromText(messageText, todayStr);
+  const activeWorkingDate = userWorkingDates.get(userId) || todayStr;
+  
+  const trimmedMsg = messageText.trim();
+
+  // Handle "วันนี้" / "today" to reset working date back to the current day
+  if (trimmedMsg === 'วันนี้' || trimmedMsg.toLowerCase() === 'today' || trimmedMsg === 'วันปัจจุบัน' || trimmedMsg === 'ปัจจุบัน') {
+    userWorkingDates.delete(userId);
+    return {
+      type: 'text',
+      text: `📅 รีเซ็ตวันทำงานของบอทกลับสู่: "วันปัจจุบัน" (${todayStr}) เรียบร้อยแล้วค่ะ!\n\nหลังจากนี้ รายการเติมของ, บันทึกตรวจนับ, หรือไฟล์ Excel ยอดขายที่คุณส่งมา จะถูกลงบันทึกเป็นวันปัจจุบันค่ะ`
+    };
+  }
+
+  // Handle setting working date manually if they type ONLY a date (e.g., "วันที่ 2026-06-25" or "2026-06-25")
+  const rawDateCheck = extractDateFromText(trimmedMsg, '');
+  if (rawDateCheck.date && (rawDateCheck.cleanText === '' || rawDateCheck.cleanText === 'ตั้ง' || rawDateCheck.cleanText === 'เลือก')) {
+    userWorkingDates.set(userId, rawDateCheck.date);
+    return {
+      type: 'text',
+      text: `📅 ล็อควันทำงานย้อนหลังสำเร็จ!\n\nระบบล็อควันทำรายการเป็นวันที่: ${rawDateCheck.date} 🔒\n\nหลังจากนี้ ทุกปุ่มการใช้งาน, รายการหักสต๊อก, หรือไฟล์ Excel ที่อัปโหลดทาง LINE จะลงข้อมูลในวันที่นี้โดยอัตโนมัติค่ะ\n\n(หากต้องการล้างค่านี้กลับมาใช้วันปัจจุบัน พิมพ์ตอบกลับมาว่า "วันนี้")`
+    };
+  }
+
+  const { date: targetDate, cleanText: extractedCleanText } = extractDateFromText(messageText, activeWorkingDate);
   
   let cleanText = extractedCleanText.trim();
   if (!cleanText && messageText.trim()) {
@@ -439,18 +482,17 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
 
   // 2. Command: "เติมสต๊อก" (Show replenishment instructions / options)
   if (cleanText === 'เติมสต๊อก') {
-    // Return a gorgeous visual simulator flex mockup description
     return {
       type: 'flex',
       text: '📋 รายการเติมสต๊อกวัตถุดิบ',
       flexContent: {
-        title: '📋 เมนูเติมสต๊อก (Replenish)',
-        description: 'เลือกวัตถุดิบเพื่อบันทึกการเติม หรือพิมพ์: เติม [ชื่อสินค้า] [จำนวน]\nเช่น "เติม ชีส 10" หรือ "เติม แซลมอน 5"',
+        title: `📋 เมนูเติมสต๊อก (${targetDate})`,
+        description: `เลือกวัตถุดิบด้านล่างเพื่อเติมสต๊อกสำหรับวันที่ ${targetDate}\n(หรือพิมพ์: เติม [ชื่อสินค้า] [จำนวน])`,
         items: STOCK_ITEMS_LIST.map(item => ({
           code: item.code,
           name: item.nameThai,
           unit: item.unit,
-          actionText: `เติม ${item.nameThai} `
+          actionText: `เติม ${item.nameThai} วันที่ ${targetDate}`
         }))
       }
     };
@@ -462,14 +504,59 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
       type: 'flex',
       text: '📊 บันทึกสต๊อกคงเหลือประจำวัน',
       flexContent: {
-        title: '📊 บันทึกคงเหลือรายวัน (Count)',
-        description: 'เลือกวัตถุดิบเพื่อระบุของที่นับได้จริงวันนี้ หรือพิมพ์: คงเหลือ [ชื่อสินค้า] [จำนวน]\nเช่น "คงเหลือ ชีส 45" หรือ "คงเหลือ กุ้ง 8"',
+        title: `📊 บันทึกคงเหลือรายวัน (${targetDate})`,
+        description: `เลือกวัตถุดิบเพื่อบันทึกของที่นับได้จริงประจำวันที่ ${targetDate}\n(หรือพิมพ์: คงเหลือ [ชื่อสินค้า] [จำนวน])`,
         items: STOCK_ITEMS_LIST.map(item => ({
           code: item.code,
           name: item.nameThai,
           unit: item.unit,
-          actionText: `คงเหลือ ${item.nameThai} `
+          actionText: `คงเหลือ ${item.nameThai} วันที่ ${targetDate}`
         }))
+      }
+    };
+  }
+
+  // 3.5. Command: "เลือกวันที่" / "วันที่" (Show Date-Selection menu)
+  if (cleanText === 'เลือกวันที่' || cleanText === 'ตั้งวันที่' || cleanText === 'เปลี่ยนวันที่' || cleanText === 'ย้อนหลัง' || cleanText === 'วันที่') {
+    const d0 = getThaiDateLabel(0);
+    const d1 = getThaiDateLabel(1);
+    const d2 = getThaiDateLabel(2);
+    const d3 = getThaiDateLabel(3);
+    const d4 = getThaiDateLabel(4);
+
+    return {
+      type: 'flex',
+      text: '📅 เลือกวันทำงานของระบบ',
+      flexContent: {
+        title: '📅 เลือกวันทำงาน (Working Date)',
+        description: `วันทำงานของบอทขณะนี้: ${targetDate}\n\nคุณสามารถคลิกปุ่ม "เลือกจากปฏิทิน" ด้านล่างเพื่อระบุวันที่ต้องการ หรือเลือกวันย้อนหลังด่วนได้เลยค่ะ:`,
+        items: [
+          {
+            name: '📅 เลือกจากปฏิทิน (Calendar)',
+            actionType: 'datetimepicker',
+            actionData: 'action=set_working_date'
+          },
+          {
+            name: d0.label,
+            actionText: `วันที่ ${d0.dateStr}`
+          },
+          {
+            name: d1.label,
+            actionText: `วันที่ ${d1.dateStr}`
+          },
+          {
+            name: d2.label,
+            actionText: `วันที่ ${d2.dateStr}`
+          },
+          {
+            name: d3.label,
+            actionText: `วันที่ ${d3.dateStr}`
+          },
+          {
+            name: d4.label,
+            actionText: `วันที่ ${d4.dateStr}`
+          }
+        ]
       }
     };
   }
@@ -688,10 +775,37 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     };
   }
 
-  // 7. Standard Friendly Help Guide
+  // 7. Standard Friendly Help Guide as a beautiful responsive Flex Menu!
   return {
-    type: 'text',
-    text: `สวัสดีค่ะ บอทจัดการสต๊อกห้องอาหารยินดีให้บริการค่ะ! 🍽️\n\nท่านสามารถใช้งานด่วนผ่าน Rich Menu ด้านล่าง:\n🟢 ปุ่ม "เติมสต๊อก" -> เพื่อระบุการเติมสินค้า\n🔴 ปุ่ม "คงเหลือ" -> เพื่อบันทึกตรวจนับคงเหลือวันนี้\n🔵 ปุ่ม "รายงาน" -> เพื่อตรวจสอบส่วนต่างและรับไฟล์ Excel\n\nหรือส่งข้อความสั่งการได้ทันที เช่น:\n- พิมพ์: เติม ชีส 10\n- พิมพ์: คงเหลือ แซลมอน 15\n- อัปโหลดไฟล์ Excel เพื่อส่งข้อมูลการขาย\n\n*หมายเหตุ: สามารถพิมพ์ระบุวันที่ย้อนหลังต่อท้ายคำสั่งได้ เช่น "เติม ชีส 10 วันที่ 2026-06-24"`
+    type: 'flex',
+    text: '🍽️ ระบบจัดการสต๊อกห้องอาหาร ยินดีต้อนรับค่ะ',
+    flexContent: {
+      title: '🍽️ ระบบจัดการสต๊อกห้องอาหาร',
+      description: `วันทำงานบอทขณะนี้: ${activeWorkingDate}\n\nแตะเลือกเมนูด่วนด้านล่าง หรือพิมพ์สั่งงานตรงๆ ได้เลยค่ะ:`,
+      items: [
+        {
+          name: '🟢 บันทึกเติมสต๊อก',
+          actionText: 'เติมสต๊อก'
+        },
+        {
+          name: '🔴 ตรวจนับคงเหลือวันนี้',
+          actionText: 'คงเหลือ'
+        },
+        {
+          name: '📅 ตั้งวันทำงานย้อนหลัง',
+          actionType: 'datetimepicker',
+          actionData: 'action=set_working_date'
+        },
+        {
+          name: '🔵 รายงานส่วนต่างสต๊อก',
+          actionText: `รายงาน วันที่ ${activeWorkingDate}`
+        },
+        {
+          name: '🔄 รีเซ็ตกลับสู่วันปัจจุบัน',
+          actionText: 'วันนี้'
+        }
+      ]
+    }
   };
 }
 
@@ -703,6 +817,22 @@ function buildLineMessage(result: any): any {
     const rows: any[] = [];
     const items = flexContent.items || [];
     
+    const buildAction = (item: any) => {
+      if (item.actionType === 'datetimepicker') {
+        return {
+          type: "datetimepicker",
+          label: item.name,
+          data: item.actionData || "action=set_working_date",
+          mode: "date"
+        };
+      }
+      return {
+        type: "message",
+        label: item.name,
+        text: item.actionText
+      };
+    };
+
     // Group items into rows of 2 buttons each to look super-polished on mobile screens
     for (let i = 0; i < items.length; i += 2) {
       const item1 = items[i];
@@ -713,11 +843,7 @@ function buildLineMessage(result: any): any {
           type: "button",
           style: "secondary",
           height: "sm",
-          action: {
-            type: "message",
-            label: item1.name,
-            text: item1.actionText
-          }
+          action: buildAction(item1)
         }
       ];
       
@@ -726,11 +852,7 @@ function buildLineMessage(result: any): any {
           type: "button",
           style: "secondary",
           height: "sm",
-          action: {
-            type: "message",
-            label: item2.name,
-            text: item2.actionText
-          },
+          action: buildAction(item2),
           margin: "sm"
         });
       } else {
@@ -902,6 +1024,34 @@ app.post('/api/line-webhook', async (req, res) => {
                 })
               });
             }
+          }
+        }
+      } else if (event.type === 'postback') {
+        const replyToken = event.replyToken;
+        const userId = event.source?.userId || 'default';
+        const postbackData = event.postback?.data;
+        const selectedDate = event.postback?.params?.date;
+
+        if (postbackData === 'action=set_working_date' && selectedDate) {
+          userWorkingDates.set(userId, selectedDate);
+          
+          const replyText = `📅 เปลี่ยนวันทำงานของบอทเป็นวันย้อนหลัง: ${selectedDate} เรียบร้อยแล้วค่ะ!\n\nหลังจากนี้ รายการเติมของ, ตรวจนับสต๊อก หรือไฟล์ Excel ยอดขายที่คุณส่งเข้ามา จะถูกบันทึกในวันที่ ${selectedDate} โดยอัตโนมัติค่ะ\n\n(พิมพ์ว่า "วันนี้" เพื่อยกเลิกล็อควันที่ และกลับสู่วันปัจจุบันค่ะ)`;
+          
+          if (process.env.LINE_CHANNEL_ACCESS_TOKEN && replyToken) {
+            await fetch('https://api.line.me/v2/bot/message/reply', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${process.env.LINE_CHANNEL_ACCESS_TOKEN}`
+              },
+              body: JSON.stringify({
+                replyToken,
+                messages: [{
+                  type: 'text',
+                  text: replyText
+                }]
+              })
+            });
           }
         }
       }
