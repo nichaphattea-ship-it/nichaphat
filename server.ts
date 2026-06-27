@@ -580,6 +580,11 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
       }
     }
 
+    summaryText += `\n\n📋 ยอดวัตถุดิบคงเหลือจริง:`;
+    discrepancy.forEach(d => {
+      summaryText += `\n- ${d.nameThai}: ${d.actualRemaining} ${STOCK_ITEMS_MAP[d.itemCode]?.unit || 'ยูนิต'}`;
+    });
+
     summaryText += `\n\n📥 ดาวน์โหลดไฟล์ Excel สำหรับสต๊อกทั้งหมดได้ที่นี่:\n${process.env.APP_URL || 'http://localhost:3000'}/api/excel/download-report?date=${targetDate}`;
 
     return {
