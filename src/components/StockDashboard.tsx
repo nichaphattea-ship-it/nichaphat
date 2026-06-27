@@ -3,7 +3,7 @@ import {
   BarChart3, RefreshCw, FileSpreadsheet, Plus, CheckCircle, 
   AlertCircle, Database, Sparkles, Download, Upload, Info, HelpCircle
 } from 'lucide-react';
-import { StockItem, DiscrepancyReport, STOCK_ITEMS_LIST } from '../types.js';
+import { StockItem, DiscrepancyReport, STOCK_ITEMS_LIST, STOCK_ITEMS_MAP } from '../types.js';
 
 interface StockDashboardProps {
   refreshTrigger: number;
@@ -30,6 +30,107 @@ export default function StockDashboard({ refreshTrigger, onRefresh }: StockDashb
   // Remarks state
   const [tempRemarks, setTempRemarks] = useState<Record<string, string>>({});
   const [savingRemark, setSavingRemark] = useState<string | null>(null);
+
+  // Replenish state
+  const [replenishItem, setReplenishItem] = useState<string>('cheese');
+  const [replenishQty, setReplenishQty] = useState<string>('');
+  const [replenishing, setReplenishing] = useState(false);
+  const [replenishSuccess, setReplenishSuccess] = useState<string | null>(null);
+  const [replenishError, setReplenishError] = useState<string | null>(null);
+
+  // Manual Count state
+  const [countItem, setCountItem] = useState<string>('cheese');
+  const [countQty, setCountQty] = useState<string>('');
+  const [counting, setCounting] = useState(false);
+  const [countSuccess, setCountSuccess] = useState<string | null>(null);
+  const [countError, setCountError] = useState<string | null>(null);
+
+  // active tab inside the replenish / count manual panel
+  const [manualFormTab, setManualFormTab] = useState<'replenish' | 'count'>('replenish');
+
+  const handleReplenishSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!replenishItem || !replenishQty) return;
+
+    const qtyVal = parseFloat(replenishQty);
+    if (isNaN(qtyVal) || qtyVal <= 0) {
+      setReplenishError('กรุณากรอกจำนวนที่ถูกต้องและมากกว่า 0');
+      return;
+    }
+
+    setReplenishing(true);
+    setReplenishSuccess(null);
+    setReplenishError(null);
+
+    try {
+      const res = await fetch('/api/replenish', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemCode: replenishItem,
+          qty: qtyVal,
+          date: targetDate,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        const itemName = STOCK_ITEMS_MAP[replenishItem]?.nameThai || replenishItem;
+        setReplenishSuccess(`✓ เติมสต๊อก ${itemName} +${qtyVal} เรียบร้อยสำหรับวันที่ ${targetDate}`);
+        setReplenishQty('');
+        fetchData();
+        onRefresh();
+      } else {
+        setReplenishError(data.error || 'เกิดข้อผิดพลาดในการเติมสต๊อก');
+      }
+    } catch (err: any) {
+      setReplenishError(`เกิดข้อผิดพลาด: ${err.message}`);
+    } finally {
+      setReplenishing(false);
+    }
+  };
+
+  const handleCountSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!countItem || !countQty) return;
+
+    const qtyVal = parseFloat(countQty);
+    if (isNaN(qtyVal) || qtyVal < 0) {
+      setCountError('กรุณากรอกจำนวนที่ถูกต้อง (ต้องไม่น้อยกว่า 0)');
+      return;
+    }
+
+    setCounting(true);
+    setCountSuccess(null);
+    setCountError(null);
+
+    try {
+      const res = await fetch('/api/daily-count', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          itemCode: countItem,
+          qty: qtyVal,
+          date: targetDate,
+        }),
+      });
+
+      const data = await res.json();
+      if (res.ok) {
+        const itemName = STOCK_ITEMS_MAP[countItem]?.nameThai || countItem;
+        setCountSuccess(`✓ บันทึกสต๊อกนับจริง ${itemName} = ${qtyVal} เรียบร้อยสำหรับวันที่ ${targetDate}`);
+        setCountQty('');
+        fetchData();
+        onRefresh();
+      } else {
+        setCountError(data.error || 'เกิดข้อผิดพลาดในการบันทึกจำนวนนับจริง');
+      }
+    } catch (err: any) {
+      setCountError(`เกิดข้อผิดพลาด: ${err.message}`);
+    } finally {
+      setCounting(false);
+    }
+  };
 
   const handleRemarkChange = (itemCode: string, value: string) => {
     setTempRemarks(prev => ({
@@ -432,6 +533,165 @@ export default function StockDashboard({ refreshTrigger, onRefresh }: StockDashb
             </form>
           </div>
 
+          {/* บันทึกรายการผ่านเว็บ (Manual entries via Web) */}
+          <div className="bg-white p-5 rounded-2xl shadow-xs border border-gray-200" id="manual-entry-card">
+            <div className="flex items-center justify-between border-b border-gray-100 pb-3 mb-4">
+              <h3 className="font-bold text-sm text-gray-800 flex items-center gap-1.5">
+                <Plus className="w-4 h-4 text-emerald-600" />
+                บันทึกสต๊อกผ่านระบบเว็บ (Web Stock Entry)
+              </h3>
+              <div className="text-[10px] bg-emerald-50 text-emerald-800 font-bold px-2.5 py-1 rounded-full">
+                วันที่เลือก: {targetDate}
+              </div>
+            </div>
+
+            {/* Tabs selector */}
+            <div className="grid grid-cols-2 gap-1 bg-gray-100 p-1 rounded-xl mb-4 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setManualFormTab('replenish')}
+                className={`py-1.5 rounded-lg text-center transition-all ${
+                  manualFormTab === 'replenish' 
+                    ? 'bg-emerald-600 text-white shadow-xs' 
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                🟢 เติมสต๊อกวัตถุดิบ
+              </button>
+              <button
+                type="button"
+                onClick={() => setManualFormTab('count')}
+                className={`py-1.5 rounded-lg text-center transition-all ${
+                  manualFormTab === 'count' 
+                    ? 'bg-red-600 text-white shadow-xs' 
+                    : 'text-gray-500 hover:text-gray-900'
+                }`}
+              >
+                🔴 บันทึกยอดนับจริง
+              </button>
+            </div>
+
+            {manualFormTab === 'replenish' ? (
+              <form onSubmit={handleReplenishSubmit} className="space-y-3">
+                <p className="text-[11px] text-gray-400">
+                  เพิ่มยอดสต๊อกในระบบโดยตรง สำหรับวัตถุดิบที่รับเข้ามาเพิ่มในวันที่ {targetDate}
+                </p>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-500 mb-1">เลือกวัตถุดิบ:</label>
+                  <select
+                    value={replenishItem}
+                    onChange={(e) => setReplenishItem(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 font-sans font-semibold text-gray-800"
+                  >
+                    {STOCK_ITEMS_LIST.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.nameThai} ({item.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-500 mb-1">จำนวนที่เติม:</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0.01"
+                      required
+                      placeholder="เช่น 10, 5, 0.5"
+                      value={replenishQty}
+                      onChange={(e) => setReplenishQty(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-emerald-500 focus:border-emerald-500 font-mono font-bold text-gray-800"
+                    />
+                    <span className="absolute right-3 top-2.5 text-[10px] text-gray-400 font-bold">
+                      {STOCK_ITEMS_MAP[replenishItem]?.unit || 'ยูนิต'}
+                    </span>
+                  </div>
+                </div>
+
+                {replenishSuccess && (
+                  <div className="p-2.5 bg-green-50 text-green-800 text-[11px] rounded-xl border border-green-100 font-semibold">
+                    {replenishSuccess}
+                  </div>
+                )}
+
+                {replenishError && (
+                  <div className="p-2.5 bg-red-50 text-red-800 text-[11px] rounded-xl border border-red-100 font-semibold">
+                    {replenishError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={replenishing}
+                  className="w-full py-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all shadow-xs"
+                >
+                  {replenishing ? 'กำลังบันทึก...' : `บันทึกการเติมสต๊อกวันที่ ${targetDate}`}
+                </button>
+              </form>
+            ) : (
+              <form onSubmit={handleCountSubmit} className="space-y-3">
+                <p className="text-[11px] text-gray-400">
+                  บันทึกยอดที่พนักงานตรวจนับได้จริงที่หน้าเคาน์เตอร์ เพื่อใช้เปรียบเทียบหาผลต่างในวันที่ {targetDate}
+                </p>
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-500 mb-1">เลือกวัตถุดิบ:</label>
+                  <select
+                    value={countItem}
+                    onChange={(e) => setCountItem(e.target.value)}
+                    className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 bg-white focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 font-sans font-semibold text-gray-800"
+                  >
+                    {STOCK_ITEMS_LIST.map((item) => (
+                      <option key={item.code} value={item.code}>
+                        {item.nameThai} ({item.code})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-[11px] font-bold text-gray-500 mb-1">จำนวนที่นับได้จริง:</label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      step="any"
+                      min="0"
+                      required
+                      placeholder="เช่น 15, 20"
+                      value={countQty}
+                      onChange={(e) => setCountQty(e.target.value)}
+                      className="w-full px-3 py-2 text-xs rounded-xl border border-gray-200 focus:outline-none focus:ring-1 focus:ring-red-500 focus:border-red-500 font-mono font-bold text-gray-800"
+                    />
+                    <span className="absolute right-3 top-2.5 text-[10px] text-gray-400 font-bold">
+                      {STOCK_ITEMS_MAP[countItem]?.unit || 'ยูนิต'}
+                    </span>
+                  </div>
+                </div>
+
+                {countSuccess && (
+                  <div className="p-2.5 bg-green-50 text-green-800 text-[11px] rounded-xl border border-green-100 font-semibold">
+                    {countSuccess}
+                  </div>
+                )}
+
+                {countError && (
+                  <div className="p-2.5 bg-red-50 text-red-800 text-[11px] rounded-xl border border-red-100 font-semibold">
+                    {countError}
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={counting}
+                  className="w-full py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl transition-all shadow-xs"
+                >
+                  {counting ? 'กำลังบันทึก...' : `บันทึกยอดนับจริงวันที่ ${targetDate}`}
+                </button>
+              </form>
+            )}
+          </div>
+
           {/* Quick Guide */}
           <div className="bg-[#1e1e24] text-white p-5 rounded-2xl shadow-xs border border-gray-800">
             <h4 className="font-bold text-xs uppercase text-emerald-400 tracking-wider mb-2 flex items-center gap-1.5">
@@ -513,14 +773,27 @@ export default function StockDashboard({ refreshTrigger, onRefresh }: StockDashb
             return (
               <div 
                 key={item.code} 
-                className={`p-3.5 rounded-2xl bg-white border shadow-xs transition-all hover:scale-[1.02] flex flex-col justify-between h-[96px] ${
+                onClick={() => {
+                  setReplenishItem(item.code);
+                  setCountItem(item.code);
+                  document.getElementById('manual-entry-card')?.scrollIntoView({ behavior: 'smooth' });
+                }}
+                className={`p-3.5 rounded-2xl bg-white border shadow-xs transition-all hover:scale-[1.02] flex flex-col justify-between h-[96px] cursor-pointer group hover:shadow-md ${
                   isLow ? 'border-red-200 bg-red-50/10' : 'border-gray-200 hover:border-gray-300'
                 }`}
+                title="คลิกเพื่อเติมสต๊อกหรือบันทึกนับจริงด่วน"
               >
                 <div>
-                  <span className={`w-2 h-2 rounded-full inline-block mr-1.5 ${isLow ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
-                  <span className="text-[11px] font-mono text-gray-400 font-bold uppercase">{item.code}</span>
-                  <h4 className="font-black text-sm text-gray-800 tracking-tight mt-0.5 truncate">{item.nameThai}</h4>
+                  <div className="flex justify-between items-start">
+                    <span className="text-[10px] font-mono text-gray-400 font-bold uppercase truncate max-w-[70%]">{item.code}</span>
+                    <span className="opacity-0 group-hover:opacity-100 transition-opacity text-[8px] font-black text-emerald-600 bg-emerald-50 px-1.5 py-0.5 rounded-md flex items-center gap-0.5 shrink-0">
+                      <Plus className="w-2.5 h-2.5" /> บันทึก
+                    </span>
+                  </div>
+                  <h4 className="font-black text-sm text-gray-800 tracking-tight mt-0.5 truncate flex items-center gap-1">
+                    <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${isLow ? 'bg-red-500' : 'bg-emerald-500'}`}></span>
+                    {item.nameThai}
+                  </h4>
                 </div>
                 
                 <div className="flex items-baseline justify-between mt-2">

@@ -648,7 +648,7 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
             initial={{ y: 150, opacity: 0 }}
             animate={{ y: 0, opacity: 1 }}
             exit={{ y: 150, opacity: 0 }}
-            className={`absolute bottom-[110px] left-4 right-4 bg-white text-gray-800 rounded-2xl p-3 shadow-2xl z-30 border max-h-[500px] flex flex-col ${
+            className={`absolute bottom-[110px] left-4 right-4 bg-white text-gray-800 rounded-2xl p-3 shadow-2xl z-30 border max-h-[440px] flex flex-col ${
               activeMenuTab === 'replenish' ? 'border-green-100' : activeMenuTab === 'count' ? 'border-red-100' : activeMenuTab === 'note' ? 'border-amber-100' : 'border-blue-100'
             }`}
           >
@@ -736,46 +736,44 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
                   </button>
                 </div>
               </div>
-            ) : (
-              <div className="flex flex-col gap-2 flex-1 overflow-hidden">
-                <p className="text-[10px] text-gray-400 shrink-0">เลือกจำนวนวัตถุดิบ (หรือพิมพ์ตัวเลขในช่อง):</p>
-                <div className="flex-1 overflow-y-auto scrollbar-thin pr-1 space-y-0">
-                  {STOCK_ITEMS_LIST.map((item) => {
-                    const val = quantities[item.code] ?? '0';
-                    return (
-                      <div key={item.code} className="flex items-center justify-between py-1.5 border-b border-gray-100 last:border-0">
-                        <span className="text-[13px] font-semibold text-gray-800 flex-1">{item.nameThai}</span>
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          <button
-                            type="button"
-                            onClick={() => handleDecrement(item.code)}
-                            className="w-6 h-6 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold flex items-center justify-center border border-gray-200 text-sm transition-all active:scale-90"
-                          >−</button>
-                          <input
-                            type="text"
-                            value={val}
-                            onChange={(e) => handleQtyInputChange(item.code, e.target.value)}
-                            className="w-10 h-6 text-center text-xs font-bold border border-gray-200 rounded-md outline-none focus:ring-1 focus:ring-emerald-500 bg-white"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleIncrement(item.code)}
-                            className="w-6 h-6 rounded-md bg-gray-100 hover:bg-gray-200 text-gray-700 font-bold flex items-center justify-center border border-gray-200 text-sm transition-all active:scale-90"
-                          >+</button>
-                        </div>
-                      </div>
-                    );
-                  })}
+            ) : selectedItem ? (
+              <div className="space-y-3">
+                <div className="flex justify-between items-center bg-emerald-50 p-2 rounded-lg">
+                  <span className="text-xs font-semibold text-emerald-900">{selectedItem.nameThai}</span>
+                  <span className="text-[10px] bg-emerald-200 text-emerald-800 px-1.5 py-0.5 rounded font-mono">หน่วย: {selectedItem.unit}</span>
                 </div>
-                <button
-                  onClick={handleBulkSubmit}
-                  className={`w-full font-bold text-xs py-2 rounded-xl transition-all shadow-sm active:scale-[0.98] flex items-center justify-center gap-1.5 text-white shrink-0 ${
-                    activeMenuTab === 'replenish' ? 'bg-[#06c755] hover:bg-green-600' : 'bg-rose-600 hover:bg-rose-700'
-                  }`}
-                >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  ส่งข้อมูล{activeMenuTab === 'replenish' ? 'เติมสต๊อก' : 'ยอดคงเหลือ'}
-                </button>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    step="any"
+                    value={inputQty}
+                    onChange={(e) => setInputQty(e.target.value)}
+                    placeholder="ใส่จำนวนสินค้า..."
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-3 py-1.5 text-xs outline-none focus:ring-2 focus:ring-emerald-500"
+                    autoFocus
+                  />
+                  <button
+                    onClick={handleConfirmActionInMenu}
+                    className="bg-[#06c755] hover:bg-green-600 text-white font-bold text-xs px-4 rounded-xl transition-colors shrink-0"
+                  >
+                    ส่งข้อมูล
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-1 max-h-32 overflow-y-auto scrollbar-thin">
+                <p className="text-[10px] text-gray-400 mb-1">เลือกวัตถุดิบที่ต้องการบันทึก:</p>
+                <div className="grid grid-cols-2 gap-1.5">
+                  {STOCK_ITEMS_LIST.map((item) => (
+                    <button
+                      key={item.code}
+                      onClick={() => handleItemSelectInMenu(item)}
+                      className="text-left px-2 py-1 bg-gray-50 hover:bg-emerald-50 border border-gray-100 rounded-lg text-[11px] font-semibold text-gray-700 truncate"
+                    >
+                      {item.nameThai}
+                    </button>
+                  ))}
+                </div>
               </div>
             )}
           </motion.div>

@@ -83,12 +83,12 @@ app.get('/api/inventory', async (req, res) => {
 // 3. Record Replenishment
 app.post('/api/replenish', async (req, res) => {
   try {
-    const { itemCode, qty } = req.body;
+    const { itemCode, qty, date } = req.body;
     const amount = parseFloat(qty);
     if (!itemCode || isNaN(amount) || amount <= 0) {
       return res.status(400).json({ error: 'รหัสสินค้าหรือจำนวนไม่ถูกต้อง' });
     }
-    const success = await replenishStock(itemCode, amount);
+    const success = await replenishStock(itemCode, amount, date);
     if (success) {
       res.json({ success: true, message: `เพิ่มสต๊อกเรียบร้อยแล้ว` });
     } else {
