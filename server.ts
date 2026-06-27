@@ -346,10 +346,69 @@ function getThaiDateLabel(daysAgo: number): { label: string; dateStr: string } {
   return { label, dateStr };
 }
 
+// Map any user-written Thai name to standard itemCode for bulk processing
+function parseBulkStockCommand(text: string): { itemCode: string; qty: number }[] {
+  const nameMap: Record<string, string> = {
+    "เห็ดแชมปิญอง": "champignon_mushroom",
+    "เห็ดแชมปิญ": "champignon_mushroom",
+    "ซาโมซ่ากล้วย": "banana_samosa",
+    "สเต็กเนื้อ": "beef_steak",
+    "สเต๊กเนื้อ": "beef_steak",
+    "สเต็คเนื้อ": "beef_steak",
+    "ซาลามี่เนื้อ": "beef_salami",
+    "เฟรนช์ฟรายส์": "french_fries",
+    "เฟรนช์ฟราย": "french_fries",
+    "พาม่าแฮม": "parma_ham",
+    "พามาแฮม": "parma_ham",
+    "ชุดทะเล": "seafood_set",
+    "พ็อกชอป": "pork_chop",
+    "พ๊อกชอป": "pork_chop",
+    "พ็อคชอป": "pork_chop",
+    "ปลาหมึก": "squid",
+    "แซลมอน": "salmon",
+    "เซลมอน": "salmon",
+    "ซลมอน": "salmon",
+    "ซาโมซ่า": "banana_samosa",
+    "ซาลามี่": "beef_salami",
+    "เฟรนฟราย": "french_fries",
+    "หมูบด": "minced_pork",
+    "หมูสับ": "minced_pork",
+    "ทะเล": "seafood_set",
+    "เห็ด": "champignon_mushroom",
+    "ชีส": "cheese",
+    "แฮม": "ham",
+    "เบคอน": "bacon",
+    "ทูน่า": "tuna",
+    "กุ้ง": "shrimp",
+    "หมึก": "squid",
+    "หอย": "clam"
+  };
+
+  const results: { itemCode: string; qty: number }[] = [];
+  const sortedKeys = Object.keys(nameMap).sort((a, b) => b.length - a.length);
+  const escapedKeys = sortedKeys.map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|');
+  const regex = new RegExp(`(${escapedKeys})\\s*[:=,-]?\\s*(\\d+(?:\\.\\d+)?)`, 'gi');
+  
+  let match;
+  while ((match = regex.exec(text)) !== null) {
+    const matchedText = match[1];
+    const qtyVal = parseFloat(match[2]);
+    const itemCode = nameMap[matchedText];
+    if (itemCode) {
+      if (!results.some(r => r.itemCode === itemCode)) {
+        results.push({ itemCode, qty: qtyVal });
+      }
+    }
+  }
+  
+  return results;
+}
+
 // Helper to handle bot commands dynamically (used by both REAL Webhook and Simulator!)
-async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string, userId: string = 'default'): Promise<any> {
+async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileName?: string, userId: string = 'default', appUrl?: string): Promise<any> {
   const todayStr = new Date().toISOString().split('T')[0];
   const activeWorkingDate = userWorkingDates.get(userId) || todayStr;
+  const fallbackUrl = appUrl || process.env.APP_URL || 'https://ais-dev-jakoczvgg5o2lyhssvcexq-299540791310.asia-east1.run.app';
   
   const trimmedMsg = messageText.trim();
 
@@ -482,36 +541,52 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
 
   // 2. Command: "เติมสต๊อก" (Show replenishment instructions / options)
   if (cleanText === 'เติมสต๊อก') {
+    const webUrl = `${fallbackUrl}?tab=replenish&date=${targetDate}`;
     return {
       type: 'flex',
       text: '📋 รายการเติมสต๊อกวัตถุดิบ',
       flexContent: {
         title: `📋 เมนูเติมสต๊อก (${targetDate})`,
-        description: `เลือกวัตถุดิบด้านล่างเพื่อเติมสต๊อกสำหรับวันที่ ${targetDate}\n(หรือพิมพ์: เติม [ชื่อสินค้า] [จำนวน])`,
-        items: STOCK_ITEMS_LIST.map(item => ({
-          code: item.code,
-          name: item.nameThai,
-          unit: item.unit,
-          actionText: `เติม ${item.nameThai} วันที่ ${targetDate}`
-        }))
+        description: `เลือกวัตถุดิบเพื่อเติมสต๊อก หรือพิมพ์ตอบกลับ เช่น "เติม ชีส 10 แซลมอน 5"\n\n✨ สำหรับกรอกสะดวกรวดเร็วหลายรายการพร้อมกัน แนะนำกดปุ่มสีเขียวด้านล่างสุดค่ะ`,
+        items: [
+          ...STOCK_ITEMS_LIST.map(item => ({
+            code: item.code,
+            name: item.nameThai,
+            unit: item.unit,
+            actionText: `เติม ${item.nameThai} วันที่ ${targetDate}`
+          })),
+          {
+            name: '✨ กรอกผ่านเว็บมือถือทันที (แนะนำ)',
+            actionType: 'uri',
+            actionUri: webUrl
+          }
+        ]
       }
     };
   }
 
   // 3. Command: "คงเหลือ" (Show physical stock remaining instructions / options)
   if (cleanText === 'คงเหลือ') {
+    const webUrl = `${fallbackUrl}?tab=count&date=${targetDate}`;
     return {
       type: 'flex',
       text: '📊 บันทึกสต๊อกคงเหลือประจำวัน',
       flexContent: {
         title: `📊 บันทึกคงเหลือรายวัน (${targetDate})`,
-        description: `เลือกวัตถุดิบเพื่อบันทึกของที่นับได้จริงประจำวันที่ ${targetDate}\n(หรือพิมพ์: คงเหลือ [ชื่อสินค้า] [จำนวน])`,
-        items: STOCK_ITEMS_LIST.map(item => ({
-          code: item.code,
-          name: item.nameThai,
-          unit: item.unit,
-          actionText: `คงเหลือ ${item.nameThai} วันที่ ${targetDate}`
-        }))
+        description: `เลือกวัตถุดิบเพื่อบันทึก หรือพิมพ์ตอบกลับ เช่น "คงเหลือ ชีส 45 แซลมอน 20"\n\n✨ สำหรับนับของจริงทุกตัว แนะนำกดปุ่มสีแดงด้านล่างสุดค่ะ`,
+        items: [
+          ...STOCK_ITEMS_LIST.map(item => ({
+            code: item.code,
+            name: item.nameThai,
+            unit: item.unit,
+            actionText: `คงเหลือ ${item.nameThai} วันที่ ${targetDate}`
+          })),
+          {
+            name: '✨ กรอกผ่านเว็บมือถือทันที (แนะนำ)',
+            actionType: 'uri',
+            actionUri: webUrl
+          }
+        ]
       }
     };
   }
@@ -589,116 +664,122 @@ async function processBotMessage(messageText: string, fileBuffer?: Buffer, fileN
     };
   }
 
-  // 5. Pattern Parsing for: เติม [ชื่อสินค้า] [จำนวน]
-  const replenishRegex = /^(เติม|add)\s+([ก-๙a-zA-Z0-9\s_]+)\s+(\d+(\.\d+)?)$/i;
-  const repMatch = cleanText.match(replenishRegex);
-  if (repMatch) {
-    const queryName = repMatch[2].trim().toLowerCase();
-    const qty = parseFloat(repMatch[3]);
+  // 5. Pattern Parsing for: เติม [ชื่อสินค้า] [จำนวน] (supports both single and bulk items!)
+  if (/^(เติม|add)\s+/i.test(cleanText)) {
+    const results = parseBulkStockCommand(cleanText);
+    if (results.length > 0) {
+      if (results.length === 1) {
+        const itemResult = results[0];
+        const matchedItem = STOCK_ITEMS_LIST.find(it => it.code === itemResult.itemCode)!;
+        const qty = itemResult.qty;
 
-    // Find closest item match
-    const matchedItem = STOCK_ITEMS_LIST.find(item => 
-      item.nameThai === queryName || 
-      item.code.toLowerCase() === queryName ||
-      item.nameThai.includes(queryName)
-    );
+        await replenishStock(matchedItem.code, qty, targetDate);
+        const updatedInv = await getInventory();
+        const current = updatedInv.find(i => i.code === matchedItem.code)?.currentQty || 0;
 
-    if (!matchedItem) {
-      return {
-        type: 'text',
-        text: `🔍 ไม่พบสินค้าชื่อ "${queryName}" ในระบบ กรุณาเลือกพิมพ์ชื่อสินค้าที่ถูกต้อง เช่น ชีส, แซลมอน, แฮม, หมูบด`
-      };
+        return {
+          type: 'text',
+          text: `✅ เติมสต๊อกสำเร็จสำหรับวันที่ ${targetDate}!\nวัตถุดิบ: ${matchedItem.nameThai}\nจำนวนที่เพิ่ม: +${qty} ${matchedItem.unit}\nยอดคงเหลือรวมล่าสุด: ${current} ${matchedItem.unit}`
+        };
+      } else {
+        let responseText = `✅ บันทึกเติมสต๊อกสำเร็จเรียบร้อย ${results.length} รายการสำหรับวันที่ ${targetDate}! 📥\n`;
+        for (const itemResult of results) {
+          const matchedItem = STOCK_ITEMS_LIST.find(it => it.code === itemResult.itemCode)!;
+          const qty = itemResult.qty;
+          await replenishStock(matchedItem.code, qty, targetDate);
+          const updatedInv = await getInventory();
+          const current = updatedInv.find(i => i.code === matchedItem.code)?.currentQty || 0;
+          responseText += `\n- ${matchedItem.nameThai}: +${qty} ${matchedItem.unit} (รวม: ${current})`;
+        }
+        return {
+          type: 'text',
+          text: responseText
+        };
+      }
     }
 
-    await replenishStock(matchedItem.code, qty, targetDate);
-    const updatedInv = await getInventory();
-    const current = updatedInv.find(i => i.code === matchedItem.code)?.currentQty || 0;
+    // 5.5. Partial Match for: เติม [ชื่อสินค้า] (without quantity specified)
+    const partialReplenishRegex = /^(เติม|add)\s+([ก-๙a-zA-Z0-9\s_]+)$/i;
+    const partRepMatch = cleanText.match(partialReplenishRegex);
+    if (partRepMatch) {
+      const queryName = partRepMatch[2].trim().toLowerCase();
+      const matchedItem = STOCK_ITEMS_LIST.find(item => 
+        item.nameThai === queryName || 
+        item.code.toLowerCase() === queryName ||
+        item.nameThai.includes(queryName)
+      );
 
-    return {
-      type: 'text',
-      text: `✅ เติมสต๊อกสำเร็จสำหรับวันที่ ${targetDate}!\nวัตถุดิบ: ${matchedItem.nameThai}\nจำนวนที่เพิ่ม: +${qty} ${matchedItem.unit}\nยอดคงเหลือรวมล่าสุด: ${current} ${matchedItem.unit}`
-    };
-  }
+      if (matchedItem) {
+        userStates.set(userId, {
+          pendingAction: 'replenish',
+          itemCode: matchedItem.code,
+          itemName: matchedItem.nameThai,
+          date: targetDate
+        });
 
-  // 5.5. Partial Match for: เติม [ชื่อสินค้า] (without quantity specified)
-  const partialReplenishRegex = /^(เติม|add)\s+([ก-๙a-zA-Z0-9\s_]+)$/i;
-  const partRepMatch = cleanText.match(partialReplenishRegex);
-  if (partRepMatch) {
-    const queryName = partRepMatch[2].trim().toLowerCase();
-    const matchedItem = STOCK_ITEMS_LIST.find(item => 
-      item.nameThai === queryName || 
-      item.code.toLowerCase() === queryName ||
-      item.nameThai.includes(queryName)
-    );
-
-    if (matchedItem) {
-      // Save pending state
-      userStates.set(userId, {
-        pendingAction: 'replenish',
-        itemCode: matchedItem.code,
-        itemName: matchedItem.nameThai,
-        date: targetDate
-      });
-
-      return {
-        type: 'text',
-        text: `✍️ บันทึกเลือกเติมวัตถุดิบ: "${matchedItem.nameThai}"\n\n👉 กรุณาพิมพ์ระบุเฉพาะ "จำนวน" ที่ต้องการเติมตอบกลับมาได้เลยค่ะ (เช่น "10" หรือ "15.5")`
-      };
+        return {
+          type: 'text',
+          text: `✍️ บันทึกเลือกเติมวัตถุดิบ: "${matchedItem.nameThai}"\n\n👉 กรุณาพิมพ์ระบุเฉพาะ "จำนวน" ที่ต้องการเติมตอบกลับมาได้เลยค่ะ (เช่น "10" หรือ "15.5")`
+        };
+      }
     }
   }
 
-  // 6. Pattern Parsing for: คงเหลือ [ชื่อสินค้า] [จำนวน]
-  const dailyCountRegex = /^(คงเหลือ|เหลือ|นับได้|count)\s+([ก-๙a-zA-Z0-9\s_]+)\s+(\d+(\.\d+)?)$/i;
-  const countMatch = cleanText.match(dailyCountRegex);
-  if (countMatch) {
-    const queryName = countMatch[2].trim().toLowerCase();
-    const qty = parseFloat(countMatch[3]);
+  // 6. Pattern Parsing for: คงเหลือ [ชื่อสินค้า] [จำนวน] (supports both single and bulk items!)
+  if (/^(คงเหลือ|เหลือ|นับได้|count)\s+/i.test(cleanText)) {
+    const results = parseBulkStockCommand(cleanText);
+    if (results.length > 0) {
+      if (results.length === 1) {
+        const itemResult = results[0];
+        const matchedItem = STOCK_ITEMS_LIST.find(it => it.code === itemResult.itemCode)!;
+        const qty = itemResult.qty;
 
-    const matchedItem = STOCK_ITEMS_LIST.find(item => 
-      item.nameThai === queryName || 
-      item.code.toLowerCase() === queryName ||
-      item.nameThai.includes(queryName)
-    );
+        await recordDailyCount(matchedItem.code, qty, targetDate);
 
-    if (!matchedItem) {
-      return {
-        type: 'text',
-        text: `🔍 ไม่พบสินค้าชื่อ "${queryName}" ในระบบ กรุณาเลือกพิมพ์ชื่อวัตถุดิบที่ระบุในเมนู`
-      };
+        return {
+          type: 'text',
+          text: `✅ บันทึกยอดคงเหลือจริงสำเร็จสำหรับวันที่ ${targetDate}!\nวัตถุดิบ: ${matchedItem.nameThai}\nจำนวนที่นับได้จริง: ${qty} ${matchedItem.unit}\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`
+        };
+      } else {
+        let responseText = `✅ บันทึกยอดคงเหลือจริงสำเร็จ ${results.length} รายการสำหรับวันที่ ${targetDate}! 📊\n`;
+        for (const itemResult of results) {
+          const matchedItem = STOCK_ITEMS_LIST.find(it => it.code === itemResult.itemCode)!;
+          const qty = itemResult.qty;
+          await recordDailyCount(matchedItem.code, qty, targetDate);
+          responseText += `\n- ${matchedItem.nameThai}: ${qty} ${matchedItem.unit}`;
+        }
+        responseText += `\n\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`;
+        return {
+          type: 'text',
+          text: responseText
+        };
+      }
     }
 
-    await recordDailyCount(matchedItem.code, qty, targetDate);
-    
-    return {
-      type: 'text',
-      text: `✅ บันทึกยอดคงเหลือจริงสำเร็จสำหรับวันที่ ${targetDate}!\nวัตถุดิบ: ${matchedItem.nameThai}\nจำนวนที่นับได้จริง: ${qty} ${matchedItem.unit}\nระบบนำไปบันทึกเปรียบเทียบในประวัติสต๊อกเรียบร้อยแล้วค่ะ`
-    };
-  }
+    // 6.2. Partial Match for: คงเหลือ [ชื่อสินค้า] (without quantity specified)
+    const partialCountRegex = /^(คงเหลือ|เหลือ|นับได้|count)\s+([ก-๙a-zA-Z0-9\s_]+)$/i;
+    const partCountMatch = cleanText.match(partialCountRegex);
+    if (partCountMatch) {
+      const queryName = partCountMatch[2].trim().toLowerCase();
+      const matchedItem = STOCK_ITEMS_LIST.find(item => 
+        item.nameThai === queryName || 
+        item.code.toLowerCase() === queryName ||
+        item.nameThai.includes(queryName)
+      );
 
-  // 6.2. Partial Match for: คงเหลือ [ชื่อสินค้า] (without quantity specified)
-  const partialCountRegex = /^(คงเหลือ|เหลือ|นับได้|count)\s+([ก-๙a-zA-Z0-9\s_]+)$/i;
-  const partCountMatch = cleanText.match(partialCountRegex);
-  if (partCountMatch) {
-    const queryName = partCountMatch[2].trim().toLowerCase();
-    const matchedItem = STOCK_ITEMS_LIST.find(item => 
-      item.nameThai === queryName || 
-      item.code.toLowerCase() === queryName ||
-      item.nameThai.includes(queryName)
-    );
+      if (matchedItem) {
+        userStates.set(userId, {
+          pendingAction: 'count',
+          itemCode: matchedItem.code,
+          itemName: matchedItem.nameThai,
+          date: targetDate
+        });
 
-    if (matchedItem) {
-      // Save pending state
-      userStates.set(userId, {
-        pendingAction: 'count',
-        itemCode: matchedItem.code,
-        itemName: matchedItem.nameThai,
-        date: targetDate
-      });
-
-      return {
-        type: 'text',
-        text: `✍️ บันทึกเลือกคงเหลือจริง: "${matchedItem.nameThai}"\n\n👉 กรุณาพิมพ์ระบุเฉพาะ "จำนวนคงเหลือจริง" ที่นับได้วันนี้ส่งกลับมาได้เลยค่ะ (เช่น "45" หรือ "8")`
-      };
+        return {
+          type: 'text',
+          text: `✍️ บันทึกเลือกคงเหลือจริง: "${matchedItem.nameThai}"\n\n👉 กรุณาพิมพ์ระบุเฉพาะ "จำนวนคงเหลือจริง" ที่นับได้วันนี้ส่งกลับมาได้เลยค่ะ (เช่น "45" หรือ "8")`
+        };
+      }
     }
   }
 
@@ -926,6 +1007,10 @@ function buildLineMessage(result: any): any {
 // A. Real LINE Webhook Endpoint (For production messaging integration!)
 app.post('/api/line-webhook', async (req, res) => {
   try {
+    const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+    const host = req.headers.host || 'ais-dev-jakoczvgg5o2lyhssvcexq-299540791310.asia-east1.run.app';
+    const appUrl = `${protocol}://${host}`;
+
     const events = req.body.events;
     if (!events || events.length === 0) {
       return res.status(200).send('No events');
@@ -941,7 +1026,7 @@ app.post('/api/line-webhook', async (req, res) => {
 
         if (event.message.type === 'text') {
           const userId = event.source?.userId || 'default';
-          originalResult = await processBotMessage(event.message.text, undefined, undefined, userId);
+          originalResult = await processBotMessage(event.message.text, undefined, undefined, userId, appUrl);
           lineMessagePayload = buildLineMessage(originalResult);
         } else if (event.message.type === 'file') {
           const userId = event.source?.userId || 'default';
@@ -958,7 +1043,7 @@ app.post('/api/line-webhook', async (req, res) => {
               if (fileRes.ok) {
                 const arrayBuf = await fileRes.arrayBuffer();
                 const fileBuf = Buffer.from(arrayBuf);
-                originalResult = await processBotMessage('', fileBuf, fileName, userId);
+                originalResult = await processBotMessage('', fileBuf, fileName, userId, appUrl);
                 lineMessagePayload = buildLineMessage(originalResult);
               } else {
                 const errText = await fileRes.text();
@@ -1068,14 +1153,18 @@ app.post('/api/line-webhook', async (req, res) => {
 // B. Chat Simulator API for rich browser-based interactive demonstration
 app.post('/api/simulator/message', upload.single('file'), async (req, res) => {
   try {
+    const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
+    const host = req.headers.host || 'ais-dev-jakoczvgg5o2lyhssvcexq-299540791310.asia-east1.run.app';
+    const appUrl = `${protocol}://${host}`;
+
     const text = req.body.text || '';
     let response;
 
     if (req.file) {
       // User uploaded a sales Excel file through the chat simulator!
-      response = await processBotMessage(text, req.file.buffer, req.file.originalname, 'simulator');
+      response = await processBotMessage(text, req.file.buffer, req.file.originalname, 'simulator', appUrl);
     } else {
-      response = await processBotMessage(text, undefined, undefined, 'simulator');
+      response = await processBotMessage(text, undefined, undefined, 'simulator', appUrl);
     }
 
     res.json({

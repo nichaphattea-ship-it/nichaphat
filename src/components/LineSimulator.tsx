@@ -18,7 +18,14 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
     }
   ]);
   const [inputText, setInputText] = useState('');
-  const [activeMenuTab, setActiveMenuTab] = useState<'none' | 'replenish' | 'count' | 'note' | 'report'>('none');
+  const [activeMenuTab, setActiveMenuTab] = useState<'none' | 'replenish' | 'count' | 'note' | 'report'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam === 'replenish' || tabParam === 'count') {
+      return tabParam;
+    }
+    return 'none';
+  });
   const [inputQty, setInputQty] = useState('');
   const [selectedItem, setSelectedItem] = useState<any>(null);
   const [noteDirection, setNoteDirection] = useState<'เพิ่ม' | 'ลด'>('เพิ่ม');
@@ -26,7 +33,14 @@ export default function LineSimulator({ onDatabaseUpdate }: LineSimulatorProps) 
   const [isTyping, setIsTyping] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [selectedDate, setSelectedDate] = useState(() => new Date().toISOString().split('T')[0]);
+  const [selectedDate, setSelectedDate] = useState(() => {
+    const params = new URLSearchParams(window.location.search);
+    const dateParam = params.get('date');
+    if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) {
+      return dateParam;
+    }
+    return new Date().toISOString().split('T')[0];
+  });
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [flexQuantities, setFlexQuantities] = useState<Record<string, Record<string, string>>>({});
   const [submittedMessages, setSubmittedMessages] = useState<string[]>([]);

@@ -5,7 +5,14 @@ import { Bot, BarChart3, HelpCircle, Sparkles } from 'lucide-react';
 
 export default function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'simulator'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'simulator'>(() => {
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get('tab');
+    if (tabParam === 'replenish' || tabParam === 'count') {
+      return 'simulator';
+    }
+    return 'dashboard';
+  });
 
   const handleDatabaseUpdate = () => {
     setRefreshTrigger(prev => prev + 1);
